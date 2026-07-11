@@ -104,7 +104,7 @@ The binary (compiled Swift, Foundation JSON parsing) reads stdin, extracts `sess
 }
 ```
 
-- `working_since` is set when entering `working` from another state and preserved by every subsequent write in the session (the hook reads the existing file first); it is reset only by `SessionStart`. The app computes the "long task finished" peek rule from it at the `working → waiting` transition.
+- `working_since` is re-stamped to now whenever a session enters `working` from any other state, preserved across consecutive `working` writes, carried through `needsYou`/`waiting` writes (so the app can read it at transitions), and cleared by `SessionStart`. The hook reads the existing file before writing. The app computes the "long task finished" peek rule from it at the `working → waiting` transition.
 - Writes are atomic; readers treat any unparseable file as corrupt and delete it.
 
 ### 4.4 Setup and teardown (in-app, no install script)
@@ -170,7 +170,7 @@ Rationale: indigo = Gleb's accent, and the critter is interactive (clickable), s
 - **Triggers**: aggregate enters `needsYou` (always) · a session transitions `working → waiting` with `now − working_since ≥ 60 s` ("Finished" peek).
 - **Dismissal**: `needsYou` peek is sticky until the state resolves, or click. "Finished" peek auto-hides after 5 s. Click also opens the popover (programmatic click on the status item).
 - **Placement**: built-in display only (the screen whose `safeAreaInsets.top > 0`); top edge flush under the notch, horizontally centered. No notch visible (lid closed / external only) → no peek; the menu bar critter still signals.
-- **Style** (always dark — it extends the black notch): background `elevated` #1c1b1f, 1 px border `border` #2a292e (no top edge), bottom corner radius 14 (`radius-lg`), width ≈ 340 pt. Content: critter (state-colored) + title in `fg` 13 px ("Needs permission" / "Waiting for you" / "Finished") + project folder name and detail in mono `faint` 11 px.
+- **Style** (always dark — it extends the black notch): background `elevated` #1c1b1f, 1 px border `border` #2a292e (no top edge), bottom corner radius 14 (`radius-lg`), width ≈ 340 pt. Content: critter (state-colored) + title in `fg` 13 px ("Needs you" / "Finished") + project folder name and detail (tool name or notification message) in mono `faint` 11 px.
 - **Motion**: slide down + fade, 240 ms `expo-out`; reverse to hide. Reduce Motion → fade only, 150 ms.
 - **Window**: borderless non-activating `NSPanel`, level above status bar, joins all Spaces, ignores no mouse events, never steals focus.
 
