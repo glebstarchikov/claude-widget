@@ -4,18 +4,18 @@ import ClaudeWidgetCore
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var monitor: SessionMonitor!
-    private var statusItem: NSStatusItem!
+    private var statusController: StatusItemController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: ["notchAlertsEnabled": true])
 
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "circle.dashed",
-                                           accessibilityDescription: "Claude Widget")
+        statusController = StatusItemController()
 
         monitor = SessionMonitor()
-        monitor.onChange = { old, new, peeks in
+        monitor.onChange = { [weak self] old, new, peeks in
+            guard let self else { return }
             let aggregate = Aggregator.aggregate(new)
+            self.statusController.applyState(aggregate)
             NSLog("claude-widget: \(new.count) session(s), aggregate=\(aggregate), peeks=\(peeks.count)")
         }
         monitor.start()
