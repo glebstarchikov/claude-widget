@@ -17,7 +17,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         popover = NSPopover()
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: PopoverView(model: model))
+        let hosting = NSHostingController(rootView: PopoverView(model: model))
+        hosting.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = hosting
 
         statusController.onClick = { [weak self] in self?.togglePopover() }
 

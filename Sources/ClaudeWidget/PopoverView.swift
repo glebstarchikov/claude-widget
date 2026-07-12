@@ -22,9 +22,9 @@ struct PopoverView: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 12)
             } else {
-                ForEach(model.sessions, id: \.sessionId) { session in
+                ForEach(Array(model.sessions.enumerated()), id: \.element.sessionId) { index, session in
+                    if index > 0 { Divider().padding(.leading, 16) }
                     SessionRow(session: session, dark: colorScheme == .dark)
-                    Divider().padding(.leading, 16)
                 }
             }
 
