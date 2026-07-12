@@ -1,0 +1,62 @@
+# Claude Widget
+
+The Claude Code critter, living in your Mac menu bar. It mirrors your live
+Claude Code sessions — walks while Claude works, turns orange and pulses when
+Claude needs you, sleeps when nothing is running. Interruption-worthy moments
+slide out from under the notch as a Dynamic Island-style peek.
+
+Click the critter for a session list: every running session with its state,
+model, current tool, elapsed time, and any subagents running under it.
+
+- **Indigo, walking** — Claude is working
+- **Orange, pulsing** — Claude needs you (permission or input)
+- **Dim gray** — asleep, no sessions
+- **Hover the notch** — reveal a live status peek any time (with a soft haptic)
+
+Design system: [glebstar/design](https://github.com/glebstar) tokens (indigo
+accent `#4b46f5`); Claude orange `#D97757` reserved for "Claude is asking".
+
+## Install
+
+    scripts/bundle.sh --install
+
+This builds `Claude Widget.app`, installs it to `/Applications`, and launches
+it. Then click the critter → **Install hooks** (backs up `~/.claude/settings.json`
+first, then merges the hook entries additively — your existing hooks are kept).
+Hooks are all `async`, so they add zero latency to Claude sessions.
+
+## How it works
+
+Claude Code hooks invoke a tiny compiled `claude-widget-hook` binary that writes
+one JSON file per session (and per subagent) under
+`~/.claude/claude-widget/state/`. The app watches that directory and drives the
+menu bar critter, the notch peek, and the popover. No network, no API keys,
+no telemetry — it only reads local session state.
+
+Subagents are tracked in their own state files (keyed by `agent_id`), so a
+session and its concurrently-running subagents never contend on the same file.
+
+## Settings (in the popover)
+
+- **Launch at login** — start the widget automatically.
+- **Notch peek** — master switch for the notch (hover reveal + proactive peeks).
+- **Show proactively** — when the notch is on, whether it also pops up on its
+  own for needs-you / finished events (off = hover-only).
+
+## Develop
+
+    swift test                    # core logic tests
+    swift run ClaudeWidget        # run unbundled (note: the menu bar icon only
+                                  # shows from a bundled .app, so use bundle.sh)
+    scripts/simulate.sh           # replay a fake session lifecycle, no tokens burned
+    scripts/simulate.sh finished  # the long-task "Finished" peek
+
+## Uninstall
+
+Popover → **Remove hooks**, quit the app, then delete
+`/Applications/Claude Widget.app` and `~/.claude/claude-widget`.
+
+---
+
+Not affiliated with Anthropic. The critter and the Claude Code logo are
+Anthropic trademarks; this is a personal tool.
