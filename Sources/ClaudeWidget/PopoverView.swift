@@ -7,7 +7,7 @@ struct PopoverView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("SESSIONS")
+            Text(model.sessions.isEmpty ? "SESSIONS" : "SESSIONS · \(model.sessions.count)")
                 .font(Font(Theme.monoFont(11)))
                 .kerning(0.8)
                 .foregroundStyle(.secondary)
@@ -23,7 +23,7 @@ struct PopoverView: View {
                     .padding(.bottom, 12)
             } else {
                 ForEach(Array(model.sessions.enumerated()), id: \.element.sessionId) { index, session in
-                    if index > 0 { Divider().padding(.leading, 16) }
+                    if index > 0 { Divider() }
                     SessionRow(session: session, dark: colorScheme == .dark)
                 }
             }
@@ -32,7 +32,13 @@ struct PopoverView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 Toggle("Launch at login", isOn: $model.launchAtLogin)
-                Toggle("Notch alerts", isOn: $model.notchAlerts)
+                Toggle("Notch peek", isOn: $model.notchAlerts)
+                if model.notchAlerts {
+                    Toggle("Show proactively", isOn: $model.notchProactive)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 20)
+                }
             }
             .toggleStyle(.switch)
             .controlSize(.mini)
@@ -51,7 +57,7 @@ struct PopoverView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
         }
-        .frame(width: 300)
+        .frame(width: 320)
         .onAppear { model.refreshHooksStatus() }
     }
 
@@ -77,36 +83,81 @@ struct SessionRow: View {
     let dark: Bool
     @State private var hovering = false
 
+    private var accent: Color { Color(nsColor: dark ? Theme.accentDark : Theme.accentLight) }
+
     private var dotColor: Color {
         switch session.state {
-        case .working: return Color(nsColor: dark ? Theme.accentDark : Theme.accentLight)
+        case .working: return accent
         case .needsYou: return Color(nsColor: Theme.claudeOrange)
         case .waiting: return Color(nsColor: NSColor(hex: dark ? 0x53B483 : 0x1A7A4D))
         case .ready: return Color(nsColor: dark ? Theme.faintDark : Theme.faintLight)
         }
     }
 
-    private var elapsed: String {
-        let seconds = max(0, Date().timeIntervalSince1970 - session.updatedAt)
-        let minutes = Int(seconds) / 60
+    private var statusWord: String {
+        switch session.state {
+        case .working: return "working"
+        case .needsYou: return "needs you"
+        case .waiting: return "waiting for you"
+        case .ready: return "ready"
+        }
+    }
+
+    private var detail: String {
+        if session.state == .needsYou, let m = session.message { return "needs you · \(m)" }
+        if let tool = session.tool { return "\(statusWord) · \(tool)" }
+        return statusWord
+    }
+
+    private var detailColor: Color {
+        session.state == .needsYou ? Color(nsColor: Theme.claudeOrange) : .secondary
+    }
+
+    private func elapsed(_ now: Double) -> String {
+        let minutes = Int(max(0, now - session.updatedAt)) / 60
         if minutes < 1 { return "now" }
         if minutes < 60 { return "\(minutes)m" }
         return "\(minutes / 60)h \(minutes % 60)m"
     }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 30)) { _ in
-            HStack(spacing: 8) {
-                Circle().fill(dotColor).frame(width: 7, height: 7)
-                Text(session.projectName)
-                    .font(.system(size: 14))
-                Spacer()
-                Text(elapsed)
-                    .font(Font(Theme.monoFont(12)))
-                    .foregroundStyle(.secondary)
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Circle().fill(dotColor).frame(width: 7, height: 7)
+                    Text(session.projectName).font(.system(size: 14))
+                    if let model = session.model {
+                        Text(model)
+                            .font(Font(Theme.monoFont(10)))
+                            .foregroundStyle(accent)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(accent.opacity(0.4), lineWidth: 0.5))
+                    }
+                    Spacer()
+                    Text(elapsed(context.date.timeIntervalSince1970))
+                        .font(Font(Theme.monoFont(12)))
+                        .foregroundStyle(.secondary)
+                }
+                Text(detail)
+                    .font(Font(Theme.monoFont(11)))
+                    .foregroundStyle(detailColor)
+                    .lineLimit(1)
+                    .padding(.leading, 15)
+
+                ForEach(session.subagents, id: \.agentId) { sub in
+                    HStack(spacing: 6) {
+                        Text("└").font(.system(size: 11)).foregroundStyle(.tertiary)
+                        Circle().fill(accent).frame(width: 5, height: 5)
+                        Text(sub.agentType).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.8))
+                        if let tool = sub.tool {
+                            Text("· \(tool)").font(Font(Theme.monoFont(11))).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    .padding(.leading, 15)
+                }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 7)
+            .padding(.vertical, 8)
             .background(hovering ? Color.primary.opacity(0.05) : .clear)
             .onHover { hovering = $0 }
         }

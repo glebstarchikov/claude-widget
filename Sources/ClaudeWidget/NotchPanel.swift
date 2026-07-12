@@ -60,6 +60,9 @@ final class NotchPanelController {
 
     private func show(title: String, detail: String, color: NSColor, dismissal: Dismissal) {
         guard UserDefaults.standard.bool(forKey: "notchAlertsEnabled") else { return }
+        // Proactive peeks (needs-you / finished) can be turned off separately,
+        // leaving hover-to-reveal working.
+        if dismissal != .hover, !UserDefaults.standard.bool(forKey: "notchProactiveEnabled") { return }
         guard let screen = builtInScreen() else { return }
         // A sticky needs-you alert outranks a finished toast or a hover peek.
         if sticky, dismissal != .sticky { return }

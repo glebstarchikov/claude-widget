@@ -11,6 +11,8 @@ public enum HooksConfigMerger {
         ("Notification", nil),
         ("Stop", nil),
         ("SessionEnd", nil),
+        ("SubagentStart", nil),
+        ("SubagentStop", nil),
     ]
 
     static func entryIsOurs(_ entry: [String: Any]) -> Bool {

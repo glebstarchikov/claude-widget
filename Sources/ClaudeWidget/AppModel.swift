@@ -12,6 +12,12 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(notchAlerts, forKey: "notchAlertsEnabled") }
     }
 
+    /// When the notch is on, whether it also pops up on its own for needs-you /
+    /// finished events (vs. only revealing on hover).
+    @Published var notchProactive: Bool {
+        didSet { UserDefaults.standard.set(notchProactive, forKey: "notchProactiveEnabled") }
+    }
+
     @Published var launchAtLogin: Bool {
         didSet {
             do {
@@ -31,6 +37,7 @@ final class AppModel: ObservableObject {
 
     init() {
         notchAlerts = UserDefaults.standard.bool(forKey: "notchAlertsEnabled")
+        notchProactive = UserDefaults.standard.bool(forKey: "notchProactiveEnabled")
         launchAtLogin = SMAppService.mainApp.status == .enabled
         refreshHooksStatus()
     }

@@ -12,7 +12,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hover: NotchHoverController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        UserDefaults.standard.register(defaults: ["notchAlertsEnabled": true])
+        UserDefaults.standard.register(defaults: [
+            "notchAlertsEnabled": true,
+            "notchProactiveEnabled": true,
+        ])
 
         model = AppModel()
         statusController = StatusItemController()
