@@ -43,13 +43,21 @@ final class AppModel: ObservableObject {
     }
 
     func installHooks() {
-        try? installer.install()
+        do { try installer.install() } catch { report("install", error) }
         refreshHooksStatus()
     }
 
     func removeHooks() {
-        try? installer.remove()
+        do { try installer.remove() } catch { report("remove", error) }
         refreshHooksStatus()
+    }
+
+    private func report(_ verb: String, _ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Couldn't \(verb) hooks"
+        alert.informativeText = error.localizedDescription
+        alert.alertStyle = .warning
+        alert.runModal()
     }
 
     func refreshHooksStatus() {

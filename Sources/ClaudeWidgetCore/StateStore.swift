@@ -28,7 +28,7 @@ public struct StateStore: Sendable {
         case .write(let session):
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let data = try JSONEncoder().encode(session)
-            let tmp = directory.appendingPathComponent(".\(session.sessionId).tmp")
+            let tmp = directory.appendingPathComponent(".\(session.sessionId).\(UUID().uuidString).tmp")
             try data.write(to: tmp)
             _ = try FileManager.default.replaceItemAt(fileURL(for: session.sessionId), withItemAt: tmp)
         }
@@ -43,7 +43,7 @@ public struct StateStore: Sendable {
         case .write(let record):
             try FileManager.default.createDirectory(at: subagentDir, withIntermediateDirectories: true)
             let data = try JSONEncoder().encode(record)
-            let tmp = subagentDir.appendingPathComponent(".\(record.agentId).tmp")
+            let tmp = subagentDir.appendingPathComponent(".\(record.agentId).\(UUID().uuidString).tmp")
             try data.write(to: tmp)
             _ = try FileManager.default.replaceItemAt(subagentURL(record.agentId), withItemAt: tmp)
         }

@@ -206,6 +206,7 @@ struct PeekView: View {
 final class NotchHoverController {
     private var globalMonitor: Any?
     private var localMonitor: Any?
+    private var screenObserver: Any?
     private var inside = false
     private var triggerRect: NSRect = .zero   // small: entering here reveals the peek
     private var keepRect: NSRect = .zero       // notch + peek: staying here keeps it up
@@ -214,7 +215,27 @@ final class NotchHoverController {
     var onHoverOut: (() -> Void)?
 
     func start() {
-        guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) else { return }
+        recompute()
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+            self?.update()
+        }
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
+            self?.update()
+            return event
+        }
+        // Resolution / display changes move the notch — recompute the hover zones
+        // so they don't point at stale coordinates until the next restart.
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.recompute() }
+        }
+    }
+
+    private func recompute() {
+        guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) else {
+            triggerRect = .zero; keepRect = .zero; return
+        }
         let top = screen.safeAreaInsets.top
         let left = screen.auxiliaryTopLeftArea?.width ?? 0
         let right = screen.auxiliaryTopRightArea?.width ?? 0
@@ -230,14 +251,6 @@ final class NotchHoverController {
         // the mouse down onto the peek to click never dismisses it.
         keepRect = NSRect(x: midX - peekW / 2, y: maxY - top - visibleHeight,
                           width: peekW, height: top + visibleHeight)
-
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
-            self?.update()
-        }
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
-            self?.update()
-            return event
-        }
     }
 
     private func update() {
@@ -252,5 +265,6 @@ final class NotchHoverController {
     deinit {
         if let g = globalMonitor { NSEvent.removeMonitor(g) }
         if let l = localMonitor { NSEvent.removeMonitor(l) }
+        if let s = screenObserver { NotificationCenter.default.removeObserver(s) }
     }
 }

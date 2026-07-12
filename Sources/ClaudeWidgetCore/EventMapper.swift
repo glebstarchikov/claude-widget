@@ -106,7 +106,7 @@ public enum EventMapper {
         switch event {
         case "SubagentStart":
             return .write(record(tool: nil))
-        case "PreToolUse", "PostToolUse":
+        case "PreToolUse":
             return .write(record(tool: payload.toolDisplay ?? previous?.tool))
         case "SubagentStop":
             return .remove(agentId: agentId)

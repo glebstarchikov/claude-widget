@@ -41,6 +41,24 @@ struct HookInstaller {
             suffix += 1
         }
         try FileManager.default.copyItem(at: WidgetConstants.claudeSettings, to: backup)
+        pruneBackups(in: dir, keeping: 5)
+    }
+
+    /// Keeps only the newest `keep` widget backups — otherwise they accumulate
+    /// one per install/remove forever.
+    private func pruneBackups(in dir: URL, keeping keep: Int) {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        let backups = files
+            .filter { $0.lastPathComponent.hasPrefix("settings.json.backup-claude-widget-") }
+            .sorted {
+                let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                return a > b
+            }
+        for old in backups.dropFirst(keep) {
+            try? FileManager.default.removeItem(at: old)
+        }
     }
 
     func install() throws {
