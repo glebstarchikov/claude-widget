@@ -27,12 +27,28 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private let installer = HookInstaller()
+
     init() {
         notchAlerts = UserDefaults.standard.bool(forKey: "notchAlertsEnabled")
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        refreshHooksStatus()
     }
 
-    func installHooks() {}   // implemented in Task 13
-    func removeHooks() {}    // implemented in Task 13
-    func refreshHooksStatus() {}  // implemented in Task 13
+    func installHooks() {
+        try? installer.install()
+        refreshHooksStatus()
+    }
+
+    func removeHooks() {
+        try? installer.remove()
+        refreshHooksStatus()
+    }
+
+    func refreshHooksStatus() {
+        hooksInstalled = installer.isInstalled()
+        if hooksInstalled {
+            try? installer.refreshBinary()
+        }
+    }
 }
