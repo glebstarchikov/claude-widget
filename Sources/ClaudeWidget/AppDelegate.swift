@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusController: StatusItemController!
     private var model: AppModel!
     private var popover: NSPopover!
+    private var notch: NotchPanelController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: ["notchAlertsEnabled": true])
@@ -23,12 +24,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusController.onClick = { [weak self] in self?.togglePopover() }
 
+        notch = NotchPanelController()
+        notch.onTap = { [weak self] in self?.openPopover() }
+
         monitor = SessionMonitor()
         monitor.onChange = { [weak self] old, new, peeks in
             guard let self else { return }
             let aggregate = Aggregator.aggregate(new)
             self.model.sessions = new
             self.statusController.applyState(aggregate)
+            self.notch.resolveIfSticky(aggregate: aggregate)
+            for peek in peeks {
+                switch peek {
+                case .needsYou(let session):
+                    self.notch.showNeedsYou(session)
+                case .finished(let session, let duration):
+                    self.notch.showFinished(session, duration: duration)
+                }
+            }
         }
         monitor.start()
     }
