@@ -4,31 +4,42 @@ import ClaudeWidgetCore
 @MainActor
 final class SessionMonitor {
     private let store = StateStore(directory: WidgetConstants.stateDir)
-    private var source: DispatchSourceFileSystemObject?
-    private var directoryDescriptor: CInt = -1
+    private var sources: [DispatchSourceFileSystemObject] = []
     private var debounce: DispatchWorkItem?
     private var gcTimer: Timer?
 
     private(set) var sessions: [Session] = []
     var onChange: (([Session], [Session], [PeekEvent]) -> Void)?
 
+    private var subagentDir: URL {
+        WidgetConstants.stateDir.appendingPathComponent("subagents", isDirectory: true)
+    }
+
     func start() {
-        try? FileManager.default.createDirectory(at: WidgetConstants.stateDir,
-                                                 withIntermediateDirectories: true)
-        directoryDescriptor = open(WidgetConstants.stateDir.path, O_EVTONLY)
-        guard directoryDescriptor >= 0 else { return }
-        let source = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: directoryDescriptor, eventMask: [.write], queue: .main)
-        source.setEventHandler { [weak self] in self?.scheduleReload() }
-        source.setCancelHandler { [directoryDescriptor] in close(directoryDescriptor) }
-        source.resume()
-        self.source = source
+        // Watch the session dir AND the subagents subdir: kqueue vnode events
+        // don't propagate from a subdirectory to its parent, so a subagent
+        // write would never wake a watcher on stateDir alone.
+        for dir in [WidgetConstants.stateDir, subagentDir] {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            watch(dir)
+        }
 
         gcTimer = Timer.scheduledTimer(withTimeInterval: WidgetConstants.gcInterval,
-                                       repeats: true) { _ in
-            Task { @MainActor in self.reload() }
+                                       repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.reload() }
         }
         reload()
+    }
+
+    private func watch(_ dir: URL) {
+        let fd = open(dir.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd, eventMask: [.write], queue: .main)
+        source.setEventHandler { [weak self] in self?.scheduleReload() }
+        source.setCancelHandler { close(fd) }
+        source.resume()
+        sources.append(source)
     }
 
     private func scheduleReload() {
