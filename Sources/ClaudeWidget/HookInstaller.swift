@@ -62,13 +62,7 @@ struct HookInstaller {
     }
 
     func install() throws {
-        try FileManager.default.createDirectory(at: WidgetConstants.binDir,
-                                                withIntermediateDirectories: true)
-        if FileManager.default.fileExists(atPath: WidgetConstants.hookBinary.path) {
-            try FileManager.default.removeItem(at: WidgetConstants.hookBinary)
-        }
-        try FileManager.default.copyItem(at: bundledHookBinary, to: WidgetConstants.hookBinary)
-
+        try refreshBinary()   // stages the hook binary into ~/.claude/claude-widget/bin
         try backupSettings()
         let merged = HooksConfigMerger.merge(settings: try readSettings(),
                                              binaryPath: Self.settingsBinaryPath)

@@ -2,6 +2,39 @@ import AppKit
 import SwiftUI
 import ClaudeWidgetCore
 
+/// The notch/peek layout for the built-in display, derived once from the screen
+/// so the panel frame (NotchPanelController) and the hover zones
+/// (NotchHoverController) can never drift apart. Single source of truth for the
+/// peek's dimensions.
+struct NotchMetrics {
+    static let minNotchWidth: CGFloat = 120
+    static let fallbackNotchWidth: CGFloat = 200   // external display / older Mac: no notch reported
+    static let minPeekWidth: CGFloat = 340
+    static let peekSidePadding: CGFloat = 120      // peek extends this far past the notch
+    static let visibleHeight: CGFloat = 58         // peek height below the menu bar
+    static let cornerRadius: CGFloat = 20
+
+    let screen: NSScreen
+    let topInset: CGFloat
+    let notchWidth: CGFloat
+    let peekWidth: CGFloat
+
+    /// Nil when no built-in (notched) display is present.
+    init?(screen: NSScreen? = nil) {
+        guard let screen = screen ?? NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 })
+        else { return nil }
+        self.screen = screen
+        self.topInset = screen.safeAreaInsets.top
+        let left = screen.auxiliaryTopLeftArea?.width ?? 0
+        let right = screen.auxiliaryTopRightArea?.width ?? 0
+        let notchW = (left > 0 && right > 0)
+            ? max(Self.minNotchWidth, screen.frame.width - left - right)
+            : Self.fallbackNotchWidth
+        self.notchWidth = notchW
+        self.peekWidth = max(Self.minPeekWidth, notchW + Self.peekSidePadding)
+    }
+}
+
 @MainActor
 final class NotchPanelController {
     private var panel: NSPanel?
@@ -43,27 +76,12 @@ final class NotchPanelController {
         return minutes > 0 ? "\(minutes)m \(seconds)s" : "\(seconds)s"
     }
 
-    private func builtInScreen() -> NSScreen? {
-        NSScreen.screens.first { $0.safeAreaInsets.top > 0 }
-    }
-
-    /// The notch's pixel width, derived from the menu-bar areas flanking it.
-    /// Falls back to a typical 14"/16" notch if the areas aren't reported.
-    private func notchWidth(for screen: NSScreen) -> CGFloat {
-        let left = screen.auxiliaryTopLeftArea?.width ?? 0
-        let right = screen.auxiliaryTopRightArea?.width ?? 0
-        if left > 0, right > 0 {
-            return max(120, screen.frame.width - left - right)
-        }
-        return 200
-    }
-
     private func show(title: String, detail: String, color: NSColor, dismissal: Dismissal) {
         guard UserDefaults.standard.bool(forKey: "notchAlertsEnabled") else { return }
         // Proactive peeks (needs-you / finished) can be turned off separately,
         // leaving hover-to-reveal working.
         if dismissal != .hover, !UserDefaults.standard.bool(forKey: "notchProactiveEnabled") { return }
-        guard let screen = builtInScreen() else { return }
+        guard let metrics = NotchMetrics() else { return }
         // A sticky needs-you alert outranks a finished toast or a hover peek.
         if sticky, dismissal != .sticky { return }
 
@@ -72,10 +90,10 @@ final class NotchPanelController {
         current = dismissal
         self.sticky = (dismissal == .sticky)
 
-        let notchW = notchWidth(for: screen)
-        let width = max(340, notchW + 120)
-        let topInset = screen.safeAreaInsets.top       // panel extends up behind the menu bar
-        let visibleHeight: CGFloat = 58
+        let screen = metrics.screen
+        let width = metrics.peekWidth
+        let topInset = metrics.topInset                // panel extends up behind the menu bar
+        let visibleHeight = NotchMetrics.visibleHeight
         let height = visibleHeight + topInset
         let notchBottom = screen.frame.maxY - topInset
         let finalFrame = NSRect(x: screen.frame.midX - width / 2,
@@ -148,7 +166,7 @@ final class NotchPanelController {
 /// its corners are hidden and the sides read as filled) and rounded bottom
 /// corners. Pure black, so the notch merges into it seamlessly.
 struct NotchPeekShape: Shape {
-    var cornerRadius: CGFloat = 20
+    var cornerRadius: CGFloat = NotchMetrics.cornerRadius
 
     func path(in rect: CGRect) -> Path {
         let w = rect.width, h = rect.height
@@ -196,7 +214,7 @@ struct PeekView: View {
         .padding(.top, topInset + 10)
         .padding(.bottom, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .background(NotchPeekShape(cornerRadius: 20).fill(Color.black))
+        .background(NotchPeekShape().fill(Color.black))
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
     }
@@ -235,24 +253,19 @@ final class NotchHoverController {
     }
 
     private func recompute() {
-        guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) else {
+        guard let metrics = NotchMetrics() else {
             triggerRect = .zero; keepRect = .zero; return
         }
-        let top = screen.safeAreaInsets.top
-        let left = screen.auxiliaryTopLeftArea?.width ?? 0
-        let right = screen.auxiliaryTopRightArea?.width ?? 0
-        let notchW = (left > 0 && right > 0) ? max(120, screen.frame.width - left - right) : 200
-        let peekW = max(340, notchW + 120)
-        let visibleHeight: CGFloat = 58
-        let midX = screen.frame.midX, maxY = screen.frame.maxY
+        let top = metrics.topInset
+        let midX = metrics.screen.frame.midX, maxY = metrics.screen.frame.maxY
 
         // Trigger: the notch itself (a little padded), easy to aim for.
-        triggerRect = NSRect(x: midX - notchW / 2 - 24, y: maxY - top - 4,
-                             width: notchW + 48, height: top + 4)
+        triggerRect = NSRect(x: midX - metrics.notchWidth / 2 - 24, y: maxY - top - 4,
+                             width: metrics.notchWidth + 48, height: top + 4)
         // Keep-alive: the notch plus the whole peek footprint below it, so moving
         // the mouse down onto the peek to click never dismisses it.
-        keepRect = NSRect(x: midX - peekW / 2, y: maxY - top - visibleHeight,
-                          width: peekW, height: top + visibleHeight)
+        keepRect = NSRect(x: midX - metrics.peekWidth / 2, y: maxY - top - NotchMetrics.visibleHeight,
+                          width: metrics.peekWidth, height: top + NotchMetrics.visibleHeight)
     }
 
     private func update() {

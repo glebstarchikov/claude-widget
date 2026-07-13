@@ -4,7 +4,6 @@ public struct HookPayload: Sendable {
     public var sessionId: String
     public var cwd: String
     public var message: String?
-    public var notificationType: String?
     public var toolName: String?
     public var toolDisplay: String?
     public var agentId: String?
@@ -18,7 +17,6 @@ public struct HookPayload: Sendable {
         sessionId = id
         cwd = obj["cwd"] as? String ?? ""
         message = obj["message"] as? String
-        notificationType = obj["notification_type"] as? String
         toolName = obj["tool_name"] as? String
         agentId = (obj["agent_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         agentType = obj["agent_type"] as? String

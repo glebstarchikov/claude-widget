@@ -11,15 +11,11 @@ final class SessionMonitor {
     private(set) var sessions: [Session] = []
     var onChange: (([Session], [Session], [PeekEvent]) -> Void)?
 
-    private var subagentDir: URL {
-        WidgetConstants.stateDir.appendingPathComponent("subagents", isDirectory: true)
-    }
-
     func start() {
         // Watch the session dir AND the subagents subdir: kqueue vnode events
         // don't propagate from a subdirectory to its parent, so a subagent
         // write would never wake a watcher on stateDir alone.
-        for dir in [WidgetConstants.stateDir, subagentDir] {
+        for dir in [WidgetConstants.stateDir, store.subagentDir] {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             watch(dir)
         }

@@ -11,7 +11,7 @@ public struct StateStore: Sendable {
         directory.appendingPathComponent("\(sessionId).json")
     }
 
-    var subagentDir: URL {
+    public var subagentDir: URL {
         directory.appendingPathComponent("subagents", isDirectory: true)
     }
 
@@ -59,7 +59,12 @@ public struct StateStore: Sendable {
         return try? JSONDecoder().decode(SubagentRecord.self, from: data)
     }
 
-    /// Loads all live sessions, each with its subagents attached, sorted newest first.
+    /// Loads all live sessions, each with its subagents attached, sorted newest
+    /// first. Doubles as the periodic GC sweep: stale files and files that fail to
+    /// decode are removed here. Treating decode failures as corrupt-and-disposable
+    /// is safe today because writes are atomic (a reader never sees a half-written
+    /// file) — but note a future breaking schema change would discard live session
+    /// files rather than migrate them.
     public func loadAll(now: Double) -> [Session] {
         var sessions: [Session] = []
         if let files = try? FileManager.default.contentsOfDirectory(
