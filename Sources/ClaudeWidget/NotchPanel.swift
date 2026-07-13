@@ -223,18 +223,22 @@ struct PeekCritter: View {
     var body: some View {
         let (color, opacity) = Theme.critterColor(state: state, darkAppearance: true)
         Group {
-            switch state {
-            case .working where !reduceMotion:
-                TimelineView(.periodic(from: .now, by: WidgetConstants.walkFrameDuration)) { context in
-                    let step = Int(context.date.timeIntervalSinceReferenceDate / WidgetConstants.walkFrameDuration)
-                    image(step.isMultiple(of: 2) ? .walkA : .walkB, color, opacity)
+            if reduceMotion {
+                image(state == .asleep ? .asleep : .idle, color, opacity)
+            } else {
+                switch state {
+                case .working:
+                    TimelineView(.periodic(from: .now, by: WidgetConstants.walkFrameDuration)) { context in
+                        let step = Int(context.date.timeIntervalSinceReferenceDate / WidgetConstants.walkFrameDuration)
+                        image(step.isMultiple(of: 2) ? .walkA : .walkB, color, opacity)
+                    }
+                case .needsYou:
+                    PulseCritter(color: color, opacity: opacity)
+                case .ready, .waiting:
+                    BlinkCritter(color: color, opacity: opacity)
+                case .asleep:
+                    image(.asleep, color, opacity)
                 }
-            case .needsYou where !reduceMotion:
-                PulseCritter(color: color, opacity: opacity)
-            case .asleep:
-                image(.asleep, color, opacity)
-            default:
-                image(.idle, color, opacity)
             }
         }
         .frame(width: 24, height: 24)
@@ -257,6 +261,27 @@ private struct PulseCritter: View {
             .animation(.easeInOut(duration: WidgetConstants.pulsePeriod / 2).repeatForever(autoreverses: true),
                        value: dim)
             .onAppear { dim = true }
+    }
+}
+
+/// Idle critter with the menu bar's occasional blink, for ready/waiting peeks.
+/// Mirrors StatusItemController.scheduleBlink: eyes shut ~0.12s every 4–7s.
+private struct BlinkCritter: View {
+    let color: NSColor
+    let opacity: CGFloat
+    @State private var pose: CritterPose = .idle
+
+    var body: some View {
+        Image(nsImage: CritterRenderer.image(pose: pose, color: color, opacity: opacity, pointSize: 24))
+            .task {
+                while !Task.isCancelled {
+                    let gap = Double.random(in: WidgetConstants.blinkIntervalRange)
+                    try? await Task.sleep(nanoseconds: UInt64(gap * 1_000_000_000))
+                    pose = .blink
+                    try? await Task.sleep(nanoseconds: 120_000_000)
+                    pose = .idle
+                }
+            }
     }
 }
 
