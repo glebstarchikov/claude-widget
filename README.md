@@ -56,7 +56,8 @@ session and its concurrently-running subagents never contend on the same file.
 Popover → **Remove hooks**, quit the app, then delete
 `/Applications/Claude Widget.app` and `~/.claude/claude-widget`.
 
----
+## License
 
-Not affiliated with Anthropic. The critter and the Claude Code logo are
-Anthropic trademarks; this is a personal tool.
+MIT — see [LICENSE](LICENSE). The license covers this project's code. The
+critter and the Claude Code logo are Anthropic trademarks and are not licensed
+here; this is an unofficial personal tool, not affiliated with Anthropic.

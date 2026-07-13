@@ -131,7 +131,9 @@ final class NotchPanelController {
         let panel = NSPanel(contentRect: .zero,
                             styleMask: [.borderless, .nonactivatingPanel],
                             backing: .buffered, defer: false)
-        panel.level = .statusBar
+        // Above fullscreen apps: .statusBar (25) sits *below* a fullscreen
+        // window, so the peek wouldn't show over one. .screenSaver floats above.
+        panel.level = .screenSaver
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
