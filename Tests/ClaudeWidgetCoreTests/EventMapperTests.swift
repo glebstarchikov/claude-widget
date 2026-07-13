@@ -72,4 +72,25 @@ final class EventMapperTests: XCTestCase {
     func testUnknownEventIgnored() {
         XCTAssertEqual(EventMapper.map(event: "PostToolBatch", payload: payload(), previous: nil, now: 100), .ignore)
     }
+
+    func testSessionStartCapturesModelAndTitle() {
+        let update = EventMapper.map(event: "SessionStart",
+                                     payload: payload(",\"model\":\"claude-opus-4-8\",\"session_title\":\"My Task\""),
+                                     previous: nil, now: 100)
+        guard case .write(let s) = update else { return XCTFail("expected write") }
+        XCTAssertEqual(s.model, "claude-opus-4-8")
+        XCTAssertEqual(s.title, "My Task")
+    }
+
+    func testSessionStartOnCompactPreservesModelAndTitle() {
+        // The model arrives only on the initial startup SessionStart. A later
+        // SessionStart (compaction / resume / clear) omits it — it must not wipe
+        // the model we already captured.
+        let prev = Session(sessionId: "s1", state: .working, cwd: "/tmp/proj",
+                           model: "claude-opus-4-8", title: "My Task", updatedAt: 60)
+        let update = EventMapper.map(event: "SessionStart", payload: payload(), previous: prev, now: 100)
+        guard case .write(let s) = update else { return XCTFail("expected write") }
+        XCTAssertEqual(s.model, "claude-opus-4-8", "compact SessionStart lacks model; keep the captured one")
+        XCTAssertEqual(s.title, "My Task", "same for title")
+    }
 }

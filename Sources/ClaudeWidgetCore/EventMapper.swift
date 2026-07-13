@@ -72,8 +72,13 @@ public enum EventMapper {
         }
         switch event {
         case "SessionStart":
+            // SessionStart re-fires on compaction / resume / clear, and those
+            // payloads omit the model (it's sent only on the initial startup).
+            // Preserve what we already captured so a later SessionStart can't wipe it.
             return .write(Session(sessionId: payload.sessionId, state: .ready, cwd: payload.cwd,
-                                  message: nil, model: payload.model, title: payload.sessionTitle,
+                                  message: nil,
+                                  model: payload.model ?? previous?.model,
+                                  title: payload.sessionTitle ?? previous?.title,
                                   tool: nil, workingSince: nil, updatedAt: now))
         case "UserPromptSubmit":
             return .write(session(.working, tool: nil))
