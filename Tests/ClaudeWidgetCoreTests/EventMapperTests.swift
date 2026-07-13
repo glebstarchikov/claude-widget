@@ -73,6 +73,13 @@ final class EventMapperTests: XCTestCase {
         XCTAssertEqual(EventMapper.map(event: "PostToolBatch", payload: payload(), previous: nil, now: 100), .ignore)
     }
 
+    func testContextTokensPreservedAcrossEvents() {
+        let prev = Session(sessionId: "s1", state: .working, cwd: "/tmp/proj", contextTokens: 12345, updatedAt: 20)
+        let update = EventMapper.map(event: "PreToolUse", payload: payload(), previous: prev, now: 100)
+        guard case .write(let s) = update else { return XCTFail("expected write") }
+        XCTAssertEqual(s.contextTokens, 12345)
+    }
+
     func testSessionStartCapturesModelAndTitle() {
         let update = EventMapper.map(event: "SessionStart",
                                      payload: payload(",\"model\":\"claude-opus-4-8\",\"session_title\":\"My Task\""),

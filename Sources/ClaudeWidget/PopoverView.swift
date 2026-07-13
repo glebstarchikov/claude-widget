@@ -146,6 +146,10 @@ struct SessionRow: View {
         return "\(minutes / 60)h \(minutes % 60)m"
     }
 
+    private static func formatTokens(_ n: Int) -> String {
+        n >= 1000 ? "\((n + 500) / 1000)k" : "\(n)"
+    }
+
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             VStack(alignment: .leading, spacing: 3) {
@@ -158,6 +162,11 @@ struct SessionRow: View {
                             .foregroundStyle(accent)
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .overlay(RoundedRectangle(cornerRadius: 4).stroke(accent.opacity(0.4), lineWidth: 0.5))
+                    }
+                    if let ctx = session.contextTokens {
+                        Text("\(Self.formatTokens(ctx)) ctx")
+                            .font(Font(Theme.monoFont(10)))
+                            .foregroundStyle(.tertiary)
                     }
                     Spacer()
                     Text(elapsed(context.date.timeIntervalSince1970))

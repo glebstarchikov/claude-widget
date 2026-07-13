@@ -10,6 +10,7 @@ public struct HookPayload: Sendable {
     public var agentType: String?
     public var model: String?
     public var sessionTitle: String?
+    public var transcriptPath: String?
 
     public init?(json: Data) {
         guard let obj = try? JSONSerialization.jsonObject(with: json) as? [String: Any],
@@ -22,6 +23,7 @@ public struct HookPayload: Sendable {
         agentType = obj["agent_type"] as? String
         model = obj["model"] as? String
         sessionTitle = obj["session_title"] as? String
+        transcriptPath = obj["transcript_path"] as? String
         if let name = toolName {
             toolDisplay = Self.formatTool(name: name, input: obj["tool_input"] as? [String: Any])
         }
@@ -68,7 +70,8 @@ public enum EventMapper {
             if state == .working && previous?.state != .working { workingSince = now }
             return Session(sessionId: payload.sessionId, state: state, cwd: payload.cwd,
                            message: message, model: previous?.model, title: previous?.title,
-                           tool: tool, workingSince: workingSince, updatedAt: now)
+                           tool: tool, contextTokens: previous?.contextTokens,
+                           workingSince: workingSince, updatedAt: now)
         }
         switch event {
         case "SessionStart":
@@ -79,7 +82,8 @@ public enum EventMapper {
                                   message: nil,
                                   model: payload.model ?? previous?.model,
                                   title: payload.sessionTitle ?? previous?.title,
-                                  tool: nil, workingSince: nil, updatedAt: now))
+                                  tool: nil, contextTokens: previous?.contextTokens,
+                                  workingSince: nil, updatedAt: now))
         case "UserPromptSubmit":
             return .write(session(.working, tool: nil))
         case "PreToolUse":
