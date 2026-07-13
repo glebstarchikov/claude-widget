@@ -51,6 +51,18 @@ session and its concurrently-running subagents never contend on the same file.
     scripts/simulate.sh           # replay a fake session lifecycle, no tokens burned
     scripts/simulate.sh finished  # the long-task "Finished" peek
 
+## Sharing it with others
+
+- **Build from source** — they `git clone`, run `scripts/bundle.sh --install`. No
+  warnings (locally-built apps aren't quarantined).
+- **Drag-to-install DMG** — `scripts/dmg.sh` produces `build/Claude Widget.dmg`
+  (app + Applications shortcut). Because the app is only ad-hoc signed, the
+  first launch needs a one-time **right-click → Open** to get past Gatekeeper.
+- **Notarized DMG** (opens clean, no warning) — requires an Apple Developer
+  Program membership: sign the app with a `Developer ID Application` cert, then
+  `xcrun notarytool submit … --wait` and `xcrun stapler staple`. Then anyone can
+  download and open it normally.
+
 ## Uninstall
 
 Popover → **Remove hooks**, quit the app, then delete
