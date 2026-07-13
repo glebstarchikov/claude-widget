@@ -10,11 +10,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover!
     private var notch: NotchPanelController!
     private var hover: NotchHoverController!
+    private let pushNotifier = PushNotifier()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: [
             "notchAlertsEnabled": true,
             "notchProactiveEnabled": true,
+            "pushEnabled": false,
         ])
 
         model = AppModel()
@@ -47,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.statusController.applyState(aggregate)
             self.notch.resolveIfSticky(aggregate: aggregate)
             for peek in peeks {
+                self.pushNotifier.send(peek)
                 switch peek {
                 case .needsYou(let session):
                     self.notch.showNeedsYou(session)
