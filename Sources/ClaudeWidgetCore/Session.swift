@@ -67,6 +67,9 @@ public struct Session: Codable, Equatable, Sendable {
     public var model: String?
     public var title: String?
     public var tool: String?
+    /// Bundle id of the app running this session (Terminal, iTerm, Cursor, the
+    /// Claude desktop app, …), captured by the hook from $__CFBundleIdentifier.
+    public var ownerBundleId: String?
     public var workingSince: Double?
     public var updatedAt: Double
     /// Assembled at load time from the subagent files; never serialized here.
@@ -75,13 +78,15 @@ public struct Session: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case state, cwd, message, model, title, tool
+        case ownerBundleId = "owner_bundle_id"
         case workingSince = "working_since"
         case updatedAt = "updated_at"
     }
 
     public init(sessionId: String, state: SessionState, cwd: String,
                 message: String? = nil, model: String? = nil, title: String? = nil,
-                tool: String? = nil, workingSince: Double? = nil, updatedAt: Double,
+                tool: String? = nil, ownerBundleId: String? = nil,
+                workingSince: Double? = nil, updatedAt: Double,
                 subagents: [Subagent] = []) {
         self.sessionId = sessionId
         self.state = state
@@ -90,6 +95,7 @@ public struct Session: Codable, Equatable, Sendable {
         self.model = model
         self.title = title
         self.tool = tool
+        self.ownerBundleId = ownerBundleId
         self.workingSince = workingSince
         self.updatedAt = updatedAt
         self.subagents = subagents

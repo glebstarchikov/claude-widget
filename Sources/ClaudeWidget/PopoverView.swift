@@ -159,7 +159,22 @@ struct SessionRow: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(hovering ? Color.primary.opacity(0.05) : .clear)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if let bid = session.ownerBundleId { activateOwnerApp(bid) }
+            }
             .onHover { hovering = $0 }
+            .help(session.ownerBundleId != nil ? "Jump to the app running this session" : "")
         }
+    }
+}
+
+/// Bring the app that launched a session (its owner) to the front.
+@MainActor
+func activateOwnerApp(_ bundleId: String) {
+    if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first {
+        app.activate()
+    } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 }

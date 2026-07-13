@@ -18,6 +18,13 @@ if let agentId = payload.agentId {
     try? store.applySubagent(EventMapper.mapSubagent(event: event, payload: payload, previous: previous, now: now))
 } else {
     let previous = store.read(sessionId: payload.sessionId)
-    try? store.apply(EventMapper.map(event: event, payload: payload, previous: previous, now: now))
+    var update = EventMapper.map(event: event, payload: payload, previous: previous, now: now)
+    // Tag the session with the app that launched it (Terminal, Cursor, the
+    // Claude desktop app, …) so clicking it in the popover can jump there.
+    if case .write(var session) = update {
+        session.ownerBundleId = ProcessInfo.processInfo.environment["__CFBundleIdentifier"]
+        update = .write(session)
+    }
+    try? store.apply(update)
 }
 exit(0)
