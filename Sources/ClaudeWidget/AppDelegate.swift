@@ -36,7 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hover = NotchHoverController()
         hover.onHoverIn = { [weak self] in
             guard let self, let peek = self.currentStatusPeek() else { return }
-            self.notch.showHover(title: peek.title, detail: peek.detail, color: peek.color)
+            self.notch.showHover(title: peek.title, detail: peek.detail, state: peek.state)
         }
         hover.onHoverOut = { [weak self] in self?.notch.hideHover() }
         hover.start()
@@ -63,24 +63,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The peek shown when the notch is hovered: a glanceable summary of the
     /// current session state.
-    private func currentStatusPeek() -> (title: String, detail: String, color: NSColor)? {
+    private func currentStatusPeek() -> (title: String, detail: String, state: AggregateState)? {
         let sessions = monitor.sessions
         switch Aggregator.aggregate(sessions) {
         case .needsYou:
             guard let s = sessions.first(where: { $0.state == .needsYou }) else { return nil }
             let detail = [s.projectName, s.message].compactMap { $0 }.joined(separator: " · ")
-            return ("Needs you", detail, Theme.claudeOrange)
+            return ("Needs you", detail, .needsYou)
         case .working:
             let working = sessions.filter { $0.state == .working }
             let name = working.first?.projectName ?? ""
             let detail = working.count > 1 ? "\(name) +\(working.count - 1) more" : name
-            return ("Working", detail, Theme.accentDark)
+            return ("Working", detail, .working)
         case .waiting:
-            return ("Waiting for you", sessions.first { $0.state == .waiting }?.projectName ?? "", Theme.accentDark)
+            return ("Waiting for you", sessions.first { $0.state == .waiting }?.projectName ?? "", .waiting)
         case .ready:
-            return ("Ready", sessions.first?.projectName ?? "", Theme.accentDark)
+            return ("Ready", sessions.first?.projectName ?? "", .ready)
         case .asleep:
-            return ("Sleeping", "no active sessions", Theme.faintDark)
+            return ("Sleeping", "no active sessions", .asleep)
         }
     }
 

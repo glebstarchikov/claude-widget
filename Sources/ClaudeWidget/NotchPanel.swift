@@ -48,18 +48,18 @@ final class NotchPanelController {
 
     func showNeedsYou(_ session: Session) {
         let detail = [session.projectName, session.message].compactMap { $0 }.joined(separator: " · ")
-        show(title: "Needs you", detail: detail, color: Theme.claudeOrange, dismissal: .sticky)
+        show(title: "Needs you", detail: detail, state: .needsYou, dismissal: .sticky)
     }
 
     func showFinished(_ session: Session, duration: TimeInterval) {
         show(title: "Finished", detail: "\(session.projectName) · \(DurationFormat.short(duration))",
-             color: Theme.accentDark, dismissal: .autoHide)
+             state: .waiting, dismissal: .autoHide)
     }
 
     /// Shown while the mouse hovers the notch; dismissed on mouse-out unless a
     /// higher-priority sticky alert is already up.
-    func showHover(title: String, detail: String, color: NSColor) {
-        show(title: title, detail: detail, color: color, dismissal: .hover)
+    func showHover(title: String, detail: String, state: AggregateState) {
+        show(title: title, detail: detail, state: state, dismissal: .hover)
     }
 
     func hideHover() {
@@ -70,7 +70,7 @@ final class NotchPanelController {
         if sticky && aggregate != .needsYou { hide() }
     }
 
-    private func show(title: String, detail: String, color: NSColor, dismissal: Dismissal) {
+    private func show(title: String, detail: String, state: AggregateState, dismissal: Dismissal) {
         guard UserDefaults.standard.bool(forKey: "notchAlertsEnabled") else { return }
         // Proactive peeks (needs-you / finished) can be turned off separately,
         // leaving hover-to-reveal working.
@@ -96,7 +96,7 @@ final class NotchPanelController {
         let panel = self.panel ?? makePanel()
         self.panel = panel
         panel.contentView = NSHostingView(rootView: PeekView(
-            title: title, detail: detail, critterColor: Color(nsColor: color),
+            title: title, detail: detail, state: state,
             topInset: topInset,
             onTap: { [weak self] in
                 self?.onTap?()
@@ -182,14 +182,13 @@ struct NotchPeekShape: Shape {
 struct PeekView: View {
     let title: String
     let detail: String
-    let critterColor: Color
+    let state: AggregateState
     var topInset: CGFloat = 0
     let onTap: () -> Void
 
     var body: some View {
         HStack(spacing: 11) {
-            Image(nsImage: CritterRenderer.image(
-                pose: .idle, color: NSColor(critterColor), opacity: 1.0, pointSize: 24))
+            PeekCritter(state: state)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.system(size: 13, weight: .medium))
@@ -211,6 +210,53 @@ struct PeekView: View {
         .background(NotchPeekShape().fill(Color.black))
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
+    }
+}
+
+/// The peek's critter, animated to mirror the menu bar critter for the same
+/// state: walks while working, pulses when Claude needs you, idle otherwise.
+/// Colors come from the same `Theme.critterColor` the status item uses.
+struct PeekCritter: View {
+    let state: AggregateState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let (color, opacity) = Theme.critterColor(state: state, darkAppearance: true)
+        Group {
+            switch state {
+            case .working where !reduceMotion:
+                TimelineView(.periodic(from: .now, by: WidgetConstants.walkFrameDuration)) { context in
+                    let step = Int(context.date.timeIntervalSinceReferenceDate / WidgetConstants.walkFrameDuration)
+                    image(step.isMultiple(of: 2) ? .walkA : .walkB, color, opacity)
+                }
+            case .needsYou where !reduceMotion:
+                PulseCritter(color: color, opacity: opacity)
+            case .asleep:
+                image(.asleep, color, opacity)
+            default:
+                image(.idle, color, opacity)
+            }
+        }
+        .frame(width: 24, height: 24)
+    }
+
+    private func image(_ pose: CritterPose, _ color: NSColor, _ opacity: CGFloat) -> Image {
+        Image(nsImage: CritterRenderer.image(pose: pose, color: color, opacity: opacity, pointSize: 24))
+    }
+}
+
+/// Idle critter with the menu bar's opacity pulse, for the needs-you peek.
+private struct PulseCritter: View {
+    let color: NSColor
+    let opacity: CGFloat
+    @State private var dim = false
+
+    var body: some View {
+        Image(nsImage: CritterRenderer.image(pose: .idle, color: color, opacity: opacity, pointSize: 24))
+            .opacity(dim ? 0.55 : 1.0)
+            .animation(.easeInOut(duration: WidgetConstants.pulsePeriod / 2).repeatForever(autoreverses: true),
+                       value: dim)
+            .onAppear { dim = true }
     }
 }
 
