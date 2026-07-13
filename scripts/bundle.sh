@@ -3,6 +3,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Keep build/ out of Spotlight/Launchpad so the intermediate .app never shows up
+# as a duplicate icon alongside the installed one.
+mkdir -p build && touch build/.metadata_never_index
+
 swift build -c release
 
 APP="build/Claude Widget.app"
