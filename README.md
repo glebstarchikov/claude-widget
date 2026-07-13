@@ -42,6 +42,13 @@ session and its concurrently-running subagents never contend on the same file.
 - **Notch peek** — master switch for the notch (hover reveal + proactive peeks).
 - **Show proactively** — when the notch is on, whether it also pops up on its
   own for needs-you / finished events (off = hover-only).
+- **Notify my phone** — push a notification to your phone when a session needs
+  you or a long task finishes, via [ntfy](https://ntfy.sh). Flip it on, install
+  the ntfy app on your phone, tap **+**, and paste the topic shown in the popover.
+  Hit **Send test** to confirm the buzz. Only the project folder name leaves your
+  Mac — never commands, paths, or prompts. On the public `ntfy.sh` server the
+  topic name is your only secret (it's randomly generated and unguessable); point
+  the `pushServer` default at your own ntfy instance for true end-to-end privacy.
 
 ## Develop
 

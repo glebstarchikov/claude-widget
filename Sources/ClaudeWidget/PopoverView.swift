@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import ClaudeWidgetCore
 
 struct PopoverView: View {
@@ -38,6 +39,31 @@ struct PopoverView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .padding(.leading, 20)
+                }
+                Toggle("Notify my phone", isOn: $model.pushEnabled)
+                if model.pushEnabled {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            Text(model.pushTopic)
+                                .font(Font(Theme.monoFont(11)))
+                                .textSelection(.enabled)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(model.pushTopic, forType: .string)
+                            } label: { Image(systemName: "doc.on.doc") }
+                                .buttonStyle(.borderless)
+                                .help("Copy topic")
+                            Spacer()
+                            Button("Send test") { model.sendTestPush() }
+                                .font(.system(size: 11))
+                        }
+                        Text("Install the ntfy app → tap +, paste this topic")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.leading, 20)
                 }
             }
             .toggleStyle(.switch)

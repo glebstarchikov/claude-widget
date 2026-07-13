@@ -18,6 +18,18 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(notchProactive, forKey: "notchProactiveEnabled") }
     }
 
+    @Published var pushEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(pushEnabled, forKey: "pushEnabled")
+            if pushEnabled, (UserDefaults.standard.string(forKey: "pushTopic") ?? "").isEmpty {
+                let topic = "claude-" + Self.randomTopicSuffix()
+                UserDefaults.standard.set(topic, forKey: "pushTopic")
+                pushTopic = topic
+            }
+        }
+    }
+    @Published var pushTopic: String
+
     @Published var launchAtLogin: Bool {
         didSet {
             do {
@@ -34,10 +46,20 @@ final class AppModel: ObservableObject {
     }
 
     private let installer = HookInstaller()
+    private let notifier = PushNotifier()
+
+    private static func randomTopicSuffix() -> String {
+        let chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+        return String((0..<12).compactMap { _ in chars.randomElement() })
+    }
+
+    func sendTestPush() { notifier.sendTest() }
 
     init() {
         notchAlerts = UserDefaults.standard.bool(forKey: "notchAlertsEnabled")
         notchProactive = UserDefaults.standard.bool(forKey: "notchProactiveEnabled")
+        pushEnabled = UserDefaults.standard.bool(forKey: "pushEnabled")
+        pushTopic = UserDefaults.standard.string(forKey: "pushTopic") ?? ""
         launchAtLogin = SMAppService.mainApp.status == .enabled
         refreshHooksStatus()
     }
