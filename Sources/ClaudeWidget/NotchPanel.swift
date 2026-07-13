@@ -52,7 +52,7 @@ final class NotchPanelController {
     }
 
     func showFinished(_ session: Session, duration: TimeInterval) {
-        show(title: "Finished", detail: "\(session.projectName) · \(Self.format(duration))",
+        show(title: "Finished", detail: "\(session.projectName) · \(DurationFormat.short(duration))",
              color: Theme.accentDark, dismissal: .autoHide)
     }
 
@@ -68,12 +68,6 @@ final class NotchPanelController {
 
     func resolveIfSticky(aggregate: AggregateState) {
         if sticky && aggregate != .needsYou { hide() }
-    }
-
-    static func format(_ duration: TimeInterval) -> String {
-        let minutes = Int(duration) / 60
-        let seconds = Int(duration) % 60
-        return minutes > 0 ? "\(minutes)m \(seconds)s" : "\(seconds)s"
     }
 
     private func show(title: String, detail: String, color: NSColor, dismissal: Dismissal) {
