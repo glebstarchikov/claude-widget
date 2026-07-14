@@ -143,15 +143,20 @@ final class NotchPanelController {
         let panel = NSPanel(contentRect: .zero,
                             styleMask: [.borderless, .nonactivatingPanel],
                             backing: .buffered, defer: false)
-        // Above fullscreen apps: .statusBar (25) sits *below* a fullscreen
-        // window, so the peek wouldn't show over one. .screenSaver floats above.
+        // Float above OTHER apps' fullscreen windows. What matters:
+        //  • .screenSaver level (.statusBar/25 sits *below* a fullscreen window).
+        //  • .canJoinAllSpaces so the panel joins the fullscreen app's space.
+        //  • NOT .fullScreenAuxiliary — with .canJoinAllSpaces it shows on every
+        //    space but *behind* another app's fullscreen window (Apple dev forums).
+        //  • NOT .stationary — it pins the window to the base/desktop space, which
+        //    fights .canJoinAllSpaces and keeps it off the fullscreen space.
         panel.level = .screenSaver
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
         panel.isMovable = false
         panel.acceptsMouseMovedEvents = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
+        panel.collectionBehavior = [.canJoinAllSpaces]
         return panel
     }
 }
