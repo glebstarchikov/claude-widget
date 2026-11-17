@@ -11,6 +11,8 @@ public struct HookPayload: Sendable {
     public var model: String?
     public var sessionTitle: String?
     public var transcriptPath: String?
+    /// `tool_input` re-serialized with sorted keys (nil when absent or not an object).
+    public var toolInputJSON: String?
 
     public init?(json: Data) {
         guard let obj = try? JSONSerialization.jsonObject(with: json) as? [String: Any],
@@ -24,6 +26,10 @@ public struct HookPayload: Sendable {
         model = obj["model"] as? String
         sessionTitle = obj["session_title"] as? String
         transcriptPath = obj["transcript_path"] as? String
+        if let input = obj["tool_input"] as? [String: Any],
+           let data = try? JSONSerialization.data(withJSONObject: input, options: [.sortedKeys]) {
+            toolInputJSON = String(data: data, encoding: .utf8)
+        }
         if let name = toolName {
             toolDisplay = Self.formatTool(name: name, input: obj["tool_input"] as? [String: Any])
         }
