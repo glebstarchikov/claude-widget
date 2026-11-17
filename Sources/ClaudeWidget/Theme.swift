@@ -17,16 +17,6 @@ enum Theme {
     static let faintLight = NSColor(hex: 0x6F6E79)
     static let faintDark = NSColor(hex: 0x908F99)
 
-    static let panelBg = NSColor(hex: 0x1C1B1F)
-    static let panelBorder = NSColor(hex: 0x2A292E)
-    static let panelFg = NSColor(hex: 0xECECEA)
-    static let panelFaint = NSColor(hex: 0x908F99)
-
-    static func monoFont(_ size: CGFloat) -> NSFont {
-        NSFont(name: "Geist Mono", size: size)
-            ?? .monospacedSystemFont(ofSize: size, weight: .regular)
-    }
-
     static func critterColor(state: AggregateState, darkAppearance: Bool) -> (color: NSColor, opacity: CGFloat) {
         switch state {
         case .asleep:

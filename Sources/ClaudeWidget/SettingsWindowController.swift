@@ -20,6 +20,7 @@ final class SettingsWindowController {
             w.center()
             window = w
         }
+        model.refreshHooksStatus()   // the window is reused; re-read on every open
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
     }

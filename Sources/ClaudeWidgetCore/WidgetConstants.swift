@@ -8,7 +8,6 @@ public enum WidgetConstants {
     public static let finishedPeekAutoHide: TimeInterval = 5
     public static let staleAfter: TimeInterval = 4 * 3600
     public static let gcInterval: TimeInterval = 3600
-    public static let peekSlideDuration: TimeInterval = 0.24
 
     public static var baseDir: URL {
         FileManager.default.homeDirectoryForCurrentUser

@@ -1,14 +1,12 @@
 import AppKit
 import Combine
 import ServiceManagement
-import ClaudeWidgetCore
 
 @MainActor
 final class AppModel: ObservableObject {
-    @Published var sessions: [Session] = []
     @Published var hooksInstalled = false
 
-    /// Hover the notch to open the hub. Persisted only for now.
+    /// Hover the notch to open the hub (pills and the critter click work either way).
     @Published var hubHoverEnabled: Bool {
         didSet { UserDefaults.standard.set(hubHoverEnabled, forKey: "hubHoverEnabled") }
     }

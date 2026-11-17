@@ -56,6 +56,5 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 440)
         .fixedSize(horizontal: false, vertical: true)
-        .onAppear { model.refreshHooksStatus() }
     }
 }
