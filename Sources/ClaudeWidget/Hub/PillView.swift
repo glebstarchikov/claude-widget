@@ -84,7 +84,7 @@ struct ApprovalPillView: View {
             // (≤ 60 characters) fits without a soft wrap, which could hide whether
             // there's a space at the break.
             Group {
-                if approval.presentation.offersAllow(inPill: true) {
+                if ApprovalPolicy.action(for: approval.presentation, on: .pill) == .allow {
                     ApprovalSummary(approval: approval)
                 } else {
                     // No Allow in the pill, so a one-line preview is enough;

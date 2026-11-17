@@ -79,6 +79,8 @@ struct HubView: View {
             } else if case .needsYou? = model.pill, let first = model.pending.first {
                 ApprovalPillView(approval: first, extra: model.pending.count - 1,
                                  answer: model.answerApproval, review: model.reviewApproval)
+                    // A new request gets fresh buttons: a press held across the swap is dropped.
+                    .id(first.id)
                     .glassEffect(.regular, in: Capsule())
                     .onGeometryChange(for: CGSize.self) { $0.size } action: { onPillSizeChange($0) }
                     .transition(transition)

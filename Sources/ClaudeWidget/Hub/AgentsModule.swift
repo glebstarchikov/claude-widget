@@ -13,8 +13,19 @@ struct AgentsModule: View {
     let reveal: String?
     @Binding var scrollOffset: CGFloat
 
+    /// Sessions with a pending request but no row yet (the monitor hasn't loaded
+    /// their state file), in request order, so every held request is on screen.
+    private var unlistedSessions: [String] {
+        var ids: [String] = []
+        for p in pending where !ids.contains(p.request.sessionId)
+            && !sessions.contains(where: { $0.sessionId == p.request.sessionId }) {
+            ids.append(p.request.sessionId)
+        }
+        return ids
+    }
+
     var body: some View {
-        if sessions.isEmpty {
+        if sessions.isEmpty && pending.isEmpty {
             HStack(spacing: 8) {
                 GlassCritter(state: .asleep)
                 Text("No sessions. The critter sleeps.")
@@ -36,6 +47,11 @@ struct AgentsModule: View {
 
     private var rows: some View {
         VStack(spacing: 0) {
+            ForEach(unlistedSessions, id: \.self) { sessionId in
+                UnlistedRequestsRow(pending: pending.filter { $0.request.sessionId == sessionId },
+                                    answer: answer)
+                    .id(sessionId)
+            }
             ForEach(sessions, id: \.sessionId) { session in
                 SessionRow(session: session,
                            pending: pending.filter { $0.request.sessionId == session.sessionId },
@@ -44,6 +60,32 @@ struct AgentsModule: View {
             }
         }
         .scrollTargetLayout()
+    }
+}
+
+/// Pending requests of a session that has no row yet: the project (from the
+/// request) and each request with its buttons.
+private struct UnlistedRequestsRow: View {
+    let pending: [PendingApproval]
+    let answer: (_ id: String, _ allow: Bool) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                GlassCritter(state: .needsYou)
+                Text(verbatim: pending.first?.projectName ?? "")
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+            }
+            ForEach(pending) { approval in
+                PendingRequestView(approval: approval, agentType: nil, answer: answer)
+                    .padding(.leading, 26)   // under the project name
+                    .padding(.vertical, 2)
+            }
+        }
+        .padding(.horizontal, SessionRow.horizontalPadding)
+        .padding(.vertical, SessionRow.verticalPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

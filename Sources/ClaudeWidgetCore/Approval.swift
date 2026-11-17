@@ -97,6 +97,21 @@ public enum ApprovalPresentation: Equatable, Sendable {
     case openOnly(summary: String)
 }
 
+/// Where a pending request is shown: the small pill, or its row in the hub.
+public enum ApprovalSurface: Sendable {
+    case pill, row
+}
+
+/// The button next to Deny.
+public enum ApprovalAction: Equatable, Sendable {
+    /// Answer yes from the notch.
+    case allow
+    /// Open the hub at the request's row, which offers Allow (pill only).
+    case review
+    /// Bring the session's app forward and answer there.
+    case open
+}
+
 public enum ApprovalPolicy {
     static let maxBashChars = 400
     static let oneLineChars = 60
@@ -159,6 +174,22 @@ public enum ApprovalPolicy {
             return .allowable(summary: ([name] + lines).joined(separator: "\n"), fitsOneLine: lines.isEmpty)
         }
         return openOnly
+    }
+
+    /// Allow is offered only where the whole request is visible and laid out
+    /// exactly: an `.allowable` request in printable ASCII (one column per
+    /// character, so ApprovalLayout's rows are exact), and in the pill only when it
+    /// also fits on one line. Otherwise the pill offers Review if the row would
+    /// offer Allow, and everything else gets Open.
+    public static func action(for presentation: ApprovalPresentation, on surface: ApprovalSurface) -> ApprovalAction {
+        guard case .allowable(let summary, let fitsOneLine) = presentation, isPrintableASCII(summary)
+        else { return .open }
+        return surface == .row || fitsOneLine ? .allow : .review
+    }
+
+    /// Space through "~", plus line breaks. No tabs or other control characters.
+    public static func isPrintableASCII(_ text: String) -> Bool {
+        text.unicodeScalars.allSatisfy { $0 == "\n" || (0x20...0x7E).contains($0.value) }
     }
 
     /// Newline and tab are fine; any other control, format (incl. bidi) or

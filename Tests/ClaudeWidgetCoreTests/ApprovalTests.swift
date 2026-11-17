@@ -46,6 +46,42 @@ final class ApprovalTests: XCTestCase {
         XCTAssertFalse(ApprovalPolicy.hookSkips(toolName: "Bash"))
     }
 
+    // MARK: - Where Allow is offered
+
+    func testOpenOnlyNeverOffersAllow() {
+        let p = ApprovalPresentation.openOnly(summary: "Edit page.tsx")
+        XCTAssertEqual(ApprovalPolicy.action(for: p, on: .pill), .open)
+        XCTAssertEqual(ApprovalPolicy.action(for: p, on: .row), .open)
+    }
+
+    func testNotOneLineNeverOffersAllowInThePill() {
+        let p = ApprovalPresentation.allowable(summary: "npm ci\nnpm test", fitsOneLine: false)
+        XCTAssertEqual(ApprovalPolicy.action(for: p, on: .pill), .review)
+        XCTAssertEqual(ApprovalPolicy.action(for: p, on: .row), .allow)
+    }
+
+    func testOneLineASCIIOffersAllowEverywhere() {
+        let p = ApprovalPresentation.allowable(summary: "npm test", fitsOneLine: true)
+        XCTAssertEqual(ApprovalPolicy.action(for: p, on: .pill), .allow)
+        XCTAssertEqual(ApprovalPolicy.action(for: p, on: .row), .allow)
+    }
+
+    func testNonPrintableASCIINeverOffersAllow() {
+        for summary in ["echo héllo", "echo 日本語", "echo 🎉", "a\tb", "a\rb", "a\u{7F}b", "mcp__x\nk: café"] {
+            for fitsOneLine in [true, false] {
+                let p = ApprovalPresentation.allowable(summary: summary, fitsOneLine: fitsOneLine)
+                XCTAssertEqual(ApprovalPolicy.action(for: p, on: .pill), .open, summary)
+                XCTAssertEqual(ApprovalPolicy.action(for: p, on: .row), .open, summary)
+            }
+        }
+    }
+
+    func testASCIIMultilineBashStillOffersAllowInTheRow() {
+        let p = ApprovalPolicy.presentation(for: request(tool: "Bash", input: #"{"command":"npm ci\nnpm run build\nnpm test"}"#))
+        XCTAssertEqual(ApprovalPolicy.action(for: p, on: .row), .allow)
+        XCTAssertEqual(ApprovalPolicy.action(for: p, on: .pill), .review)
+    }
+
     func testShortBashIsAllowableOnOneLine() {
         let p = ApprovalPolicy.presentation(for: request(tool: "Bash", input: #"{"command":"npm test"}"#))
         XCTAssertEqual(p, .allowable(summary: "npm test", fitsOneLine: true))

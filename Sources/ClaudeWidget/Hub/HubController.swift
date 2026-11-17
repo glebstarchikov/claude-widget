@@ -54,6 +54,8 @@ final class HubController {
     private var observers: [Any] = []
     /// Called each time the hub opens.
     var onOpen: (() -> Void)?
+    /// Called each time the hub closes.
+    var onClose: (() -> Void)?
 
     init(model: HubModel, appModel: AppModel) {
         self.model = model
@@ -195,6 +197,7 @@ final class HubController {
         model.expanded = false
         model.revealSessionId = nil
         updateMouseGate()
+        onClose?()
     }
 
     // MARK: - Hover
@@ -217,8 +220,13 @@ final class HubController {
 
         if let pill = pillFrame, Self.pointer(p, in: pill), let placement {
             // A pill with Allow/Deny stays put under the pointer; Review opens the hub.
+            // A dwell begun over a plain pill is vetoed if a request arrives meanwhile.
             if showsApprovalPill { dwell?.task.cancel(); dwell = nil }
-            else { startDwell(in: pill, for: Self.pillDwell) { placement } }
+            else {
+                startDwell(in: pill, for: Self.pillDwell) { [weak self] in
+                    self?.showsApprovalPill == false ? placement : nil
+                }
+            }
         } else if appModel.hubHoverEnabled, let notch, Self.pointer(p, in: notch.hoverZone) {
             startDwell(in: notch.hoverZone, for: Self.openDwell) { [weak self] in
                 guard let self, !Self.activeAppIsFullscreen(on: notch.screen) else { return nil }

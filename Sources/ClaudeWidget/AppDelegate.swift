@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var limitsToggle: AnyCancellable?
     private var approvals: ApprovalCoordinator!
     private var approvalsToggle: AnyCancellable?
+    private var proactiveToggle: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: [
@@ -56,6 +57,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         approvalsToggle = model.$answerFromNotch.sink { [weak self] enabled in
             self?.approvals.settingChanged(enabled: enabled)
         }
+        proactiveToggle = model.$notchProactive.sink { [weak self] enabled in
+            self?.approvals.proactiveChanged(enabled: enabled)
+        }
+        hub.onClose = { [weak self] in self?.approvals.hubClosed() }
         approvals.start()
 
         monitor = SessionMonitor()

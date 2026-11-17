@@ -12,7 +12,7 @@ import ClaudeWidgetCore
 @MainActor
 final class ApprovalCoordinator {
     private enum Ending {
-        case answered(allow: Bool), ownerActive, timedOut, closed, sessionMovedOn, settingOff
+        case answered(allow: Bool), ownerActive, timedOut, closed, sessionMovedOn, settingOff, noPill
 
         var label: String {
             switch self {
@@ -22,9 +22,15 @@ final class ApprovalCoordinator {
             case .closed: return "dropped: hook hung up"
             case .sessionMovedOn: return "passed: session moved on"
             case .settingOff: return "passed: setting off"
+            case .noPill: return "passed: no pill"
             }
         }
     }
+
+    /// Allow is ignored this soon after the pending list changed: a click aimed at
+    /// one request (or a double-click) must not land on another that slid into
+    /// its place. Deny is fail-safe and stays immediate.
+    private static let allowSettle: TimeInterval = 0.5
 
     private let model: HubModel
     private let appModel: AppModel
@@ -33,6 +39,8 @@ final class ApprovalCoordinator {
     private var timers: [String: Task<Void, Never>] = [:]
     /// Main-loop requests whose session has shown up in `model.sessions`.
     private var sessionSeen: Set<String> = []
+    /// When `model.pending` last gained or lost a request.
+    private var queueChangedAt = Date.distantPast
     private var observers: [NSObjectProtocol] = []
     /// `--auto-answer allow|deny`, for verification only (see `scheduleAutoAnswer`).
     private let autoAnswer: Bool?
@@ -74,13 +82,20 @@ final class ApprovalCoordinator {
         server.stop()
     }
 
-    /// Allow/Deny from the pill or a row. Allow is honored only for requests whose
-    /// whole content the notch can show (`.allowable`); anything else can only be denied.
+    /// Allow/Deny from the pill or a row. Allow is honored only where a row would
+    /// offer it (`ApprovalPolicy.action`), and not within `allowSettle` of the
+    /// pending list changing; anything else can only be denied.
     func answer(id: String, allow: Bool) {
         guard let approval = model.pending.first(where: { $0.id == id }) else { return }
-        if allow, case .openOnly = approval.presentation {
-            Logger.approval.error("allow refused: request is open-only")
-            return
+        if allow {
+            guard ApprovalPolicy.action(for: approval.presentation, on: .row) == .allow else {
+                Logger.approval.error("allow refused: not offered for this request")
+                return
+            }
+            guard Date().timeIntervalSince(queueChangedAt) >= Self.allowSettle else {
+                Logger.approval.notice("allow ignored: requests changed under the pointer")
+                return
+            }
         }
         end(id, .answered(allow: allow))
     }
@@ -88,7 +103,21 @@ final class ApprovalCoordinator {
     /// The setting was switched off: everything pending goes back to Claude Code.
     func settingChanged(enabled: Bool) {
         guard !enabled else { return }
-        for id in model.pending.map(\.id) { end(id, .settingOff) }
+        endAll(.settingOff)
+    }
+
+    /// The hub closed. With proactive alerts off no pill takes over, so nothing
+    /// would show the pending requests: they go back to Claude Code.
+    func hubClosed() {
+        guard !appModel.notchProactive else { return }
+        endAll(.noPill)
+    }
+
+    /// Proactive alerts were switched off: with the hub closed, nothing shows the
+    /// pending requests any more.
+    func proactiveChanged(enabled: Bool) {
+        guard !enabled, !model.expanded else { return }
+        endAll(.noPill)
     }
 
     /// A main-loop request ends once its session leaves needs-you after the request
@@ -125,6 +154,12 @@ final class ApprovalCoordinator {
             Logger.approval.notice("\(request.toolName, privacy: .public) passed on arrival")
             return {}
         }
+        // Held requests must be on screen: the pill (proactive alerts) or the open hub.
+        guard appModel.notchProactive || model.expanded else {
+            reply(.pass)
+            Logger.approval.notice("\(request.toolName, privacy: .public) passed: no pill")
+            return {}
+        }
 
         reply(.ack)
         let approval = PendingApproval(id: request.id, request: request,
@@ -136,6 +171,7 @@ final class ApprovalCoordinator {
             if !Task.isCancelled { self?.end(approval.id, .timedOut) }
         }
         model.pending.append(approval)
+        queueChangedAt = Date()
         Logger.approval.notice("\(request.toolName, privacy: .public) held for an answer")
         onChange?(nil)
         scheduleAutoAnswer(approval)
@@ -157,16 +193,21 @@ final class ApprovalCoordinator {
         sessionSeen.remove(id)
         let sessionId = model.pending.first { $0.id == id }?.request.sessionId
         model.pending.removeAll { $0.id == id }
+        queueChangedAt = Date()
         switch ending {
         case .answered(let allow): reply(allow ? .allow : .deny)
         case .closed: break
-        case .ownerActive, .timedOut, .sessionMovedOn, .settingOff: reply(.pass)
+        case .ownerActive, .timedOut, .sessionMovedOn, .settingOff, .noPill: reply(.pass)
         }
         Logger.approval.notice("request \(ending.label, privacy: .public)")
         switch ending {
         case .answered, .ownerActive: onChange?(sessionId)
         default: onChange?(nil)
         }
+    }
+
+    private func endAll(_ ending: Ending) {
+        for id in model.pending.map(\.id) { end(id, ending) }
     }
 
     /// Verification only. With `--auto-answer allow|deny` on the command line, a
@@ -176,7 +217,7 @@ final class ApprovalCoordinator {
     /// and without the flag this does nothing.
     private func scheduleAutoAnswer(_ approval: PendingApproval) {
         guard let allow = autoAnswer, approval.request.sessionId.hasPrefix("sim-") else { return }
-        if allow, !approval.presentation.offersAllow(inPill: true) {
+        if allow, ApprovalPolicy.action(for: approval.presentation, on: .pill) != .allow {
             Logger.approval.notice("auto-answer: the pill offers no Allow here")
             return
         }
@@ -191,15 +232,6 @@ extension ApprovalPresentation {
     var summary: String {
         switch self {
         case .allowable(let summary, _), .openOnly(let summary): return summary
-        }
-    }
-
-    /// Allow can be offered: everywhere for a row, which shows the whole request
-    /// wrapped; in the pill only when it also fits on one line.
-    func offersAllow(inPill: Bool) -> Bool {
-        switch self {
-        case .allowable(_, let fitsOneLine): return fitsOneLine || !inPill
-        case .openOnly: return false
         }
     }
 }
