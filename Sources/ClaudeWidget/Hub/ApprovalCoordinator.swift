@@ -39,11 +39,12 @@ final class ApprovalCoordinator {
     private var timers: [String: Task<Void, Never>] = [:]
     /// Main-loop requests whose session has shown up in `model.sessions`.
     private var sessionSeen: Set<String> = []
-    /// When (`now`) `model.pending` last gained or lost a request, or the session
-    /// rows moved while one was pending.
+    /// When (`now`) `model.pending` last gained or lost a request, or a request's
+    /// row moved.
     private var queueChangedAt: TimeInterval = -.infinity
-    /// Session ids in row order, as last seen.
-    private var sessionOrder: [String] = []
+    /// Each request's row top edge (global points) as last reported while the hub
+    /// is open. Kept by request id, so a row re-created elsewhere still counts as moved.
+    private var rowTops: [String: Double] = [:]
 
     /// Monotonic seconds (unaffected by wall-clock changes).
     private static var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
@@ -115,8 +116,22 @@ final class ApprovalCoordinator {
     /// The hub closed. With proactive alerts off no pill takes over, so nothing
     /// would show the pending requests: they go back to Claude Code.
     func hubClosed() {
+        rowTops.removeAll()   // rows appearing when the hub reopens aren't moves
         guard !appModel.notchProactive else { return }
         endAll(.noPill)
+    }
+
+    /// A request's row reported its top edge. If it moved (not merely appeared),
+    /// an Allow under the pointer may now belong to it by accident: settle again.
+    func rowPositioned(id: String, top: Double) {
+        guard model.pending.contains(where: { $0.id == id }) else { return }
+        let previous = rowTops[id]
+        if ApprovalLayout.rowMoved(from: previous, to: top) {
+            queueChangedAt = Self.now
+            rowTops[id] = top
+        } else if previous == nil {
+            rowTops[id] = top
+        }
     }
 
     /// Proactive alerts were switched off: with the hub closed, nothing shows the
@@ -129,12 +144,6 @@ final class ApprovalCoordinator {
     /// A main-loop request ends once its session leaves needs-you after the request
     /// arrived (Gleb answered elsewhere, or Claude moved on), or the session is gone.
     func sessionsChanged(_ sessions: [Session]) {
-        // Rows moving under the pointer is as much a change as the requests changing.
-        let order = sessions.map(\.sessionId)
-        if order != sessionOrder {
-            sessionOrder = order
-            if !model.pending.isEmpty { queueChangedAt = Self.now }
-        }
         for approval in model.pending where approval.request.agentId == nil {
             guard let session = sessions.first(where: { $0.sessionId == approval.request.sessionId }) else {
                 if sessionSeen.contains(approval.id) { end(approval.id, .sessionMovedOn) }
@@ -203,6 +212,7 @@ final class ApprovalCoordinator {
         guard let reply = replies.removeValue(forKey: id) else { return }
         timers.removeValue(forKey: id)?.cancel()
         sessionSeen.remove(id)
+        rowTops[id] = nil
         let sessionId = model.pending.first { $0.id == id }?.request.sessionId
         model.pending.removeAll { $0.id == id }
         queueChangedAt = Self.now

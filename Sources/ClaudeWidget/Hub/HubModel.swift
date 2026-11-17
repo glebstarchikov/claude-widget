@@ -52,4 +52,6 @@ final class HubModel: ObservableObject {
     var answerApproval: (_ id: String, _ allow: Bool) -> Void = { _, _ in }
     /// The pill's Review button: opens the hub at the request's session row.
     var reviewApproval: (_ sessionId: String) -> Void = { _ in }
+    /// A request's row reports its top edge (ApprovalCoordinator.rowPositioned).
+    var approvalRowTop: (_ id: String, _ top: Double) -> Void = { _, _ in }
 }

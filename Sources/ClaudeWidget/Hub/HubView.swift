@@ -67,7 +67,8 @@ struct HubView: View {
                                                                         style: .continuous))
                     }
                     AgentsModule(sessions: model.sessions, pending: model.pending,
-                                 answer: model.answerApproval, reveal: model.revealSessionId,
+                                 answer: model.answerApproval, rowTop: model.approvalRowTop,
+                                 reveal: model.revealSessionId,
                                  scrollOffset: $scrollOffset)
                         .padding(HubLayout.modulePadding)
                         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: HubLayout.cornerRadius,

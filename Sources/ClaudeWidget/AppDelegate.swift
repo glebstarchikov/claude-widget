@@ -53,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         approvals = ApprovalCoordinator(model: hubModel, appModel: model)
         hubModel.answerApproval = { [weak self] id, allow in self?.approvals.answer(id: id, allow: allow) }
         hubModel.reviewApproval = { [weak self] sessionId in self?.hub.review(sessionId: sessionId) }
+        hubModel.approvalRowTop = { [weak self] id, top in self?.approvals.rowPositioned(id: id, top: top) }
         approvals.onChange = { [weak self] dismissing in self?.hub.approvalsChanged(dismissing: dismissing) }
         approvalsToggle = model.$answerFromNotch.sink { [weak self] enabled in
             self?.approvals.settingChanged(enabled: enabled)

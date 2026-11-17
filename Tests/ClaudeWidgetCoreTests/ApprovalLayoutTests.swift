@@ -68,6 +68,15 @@ final class ApprovalLayoutTests: XCTestCase {
         XCTAssertTrue(ApprovalLayout.canOfferAllow(columns: 62))
     }
 
+    func testRowMovementIgnoresAppearingAndJitter() {
+        XCTAssertFalse(ApprovalLayout.rowMoved(from: nil, to: 120), "appearing isn't moving")
+        XCTAssertFalse(ApprovalLayout.rowMoved(from: 120, to: 120))
+        XCTAssertFalse(ApprovalLayout.rowMoved(from: 120, to: 120.6), "sub-point jitter")
+        XCTAssertFalse(ApprovalLayout.rowMoved(from: 120, to: 119.01))
+        XCTAssertTrue(ApprovalLayout.rowMoved(from: 120, to: 121))
+        XCTAssertTrue(ApprovalLayout.rowMoved(from: 120, to: 84), "a row inserted above")
+    }
+
     func testColumnsBelowOneClampToOne() {
         XCTAssertEqual(rows("abc", 0), ["a", "b", "c"])
     }

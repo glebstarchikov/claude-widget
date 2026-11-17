@@ -9,6 +9,7 @@ struct AgentsModule: View {
     let sessions: [Session]
     let pending: [PendingApproval]
     let answer: (_ id: String, _ allow: Bool) -> Void
+    let rowTop: (_ id: String, _ top: Double) -> Void
     /// A session row to open scrolled to (the pill's Review), instead of the remembered offset.
     let reveal: String?
     @Binding var scrollOffset: CGFloat
@@ -49,13 +50,13 @@ struct AgentsModule: View {
         VStack(spacing: 0) {
             ForEach(unlistedSessions, id: \.self) { sessionId in
                 UnlistedRequestsRow(pending: pending.filter { $0.request.sessionId == sessionId },
-                                    answer: answer)
+                                    answer: answer, rowTop: rowTop)
                     .id(sessionId)
             }
             ForEach(sessions, id: \.sessionId) { session in
                 SessionRow(session: session,
                            pending: pending.filter { $0.request.sessionId == session.sessionId },
-                           answer: answer)
+                           answer: answer, rowTop: rowTop)
                     .id(session.sessionId)
             }
         }
@@ -68,6 +69,7 @@ struct AgentsModule: View {
 private struct UnlistedRequestsRow: View {
     let pending: [PendingApproval]
     let answer: (_ id: String, _ allow: Bool) -> Void
+    let rowTop: (_ id: String, _ top: Double) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -78,7 +80,7 @@ private struct UnlistedRequestsRow: View {
                     .lineLimit(1)
             }
             ForEach(pending) { approval in
-                PendingRequestView(approval: approval, agentType: nil, answer: answer)
+                PendingRequestView(approval: approval, agentType: nil, answer: answer, rowTop: rowTop)
                     .padding(.leading, 26)   // under the project name
                     .padding(.vertical, 2)
             }
@@ -135,6 +137,7 @@ struct SessionRow: View {
     /// This session's live permission requests, oldest first.
     let pending: [PendingApproval]
     let answer: (_ id: String, _ allow: Bool) -> Void
+    let rowTop: (_ id: String, _ top: Double) -> Void
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
 
@@ -218,7 +221,7 @@ struct SessionRow: View {
                         agentType: approval.request.agentId.flatMap { id in
                             session.subagents.first { $0.agentId == id }?.agentType
                         },
-                        answer: answer)
+                        answer: answer, rowTop: rowTop)
                         .padding(.leading, 26)   // under the project name
                         .padding(.vertical, 2)
                 }

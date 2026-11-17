@@ -19,6 +19,16 @@ public enum ApprovalLayout {
         return columns >= minColumnsForAllow
     }
 
+    /// Smaller shifts of a request's row are layout jitter, not movement.
+    public static let minRowMove = 1.0
+
+    /// Whether a request's row moved between two reports of its top edge (points).
+    /// The first report (`previous` nil) is the row appearing, not moving.
+    public static func rowMoved(from previous: Double?, to current: Double) -> Bool {
+        guard let previous else { return false }
+        return abs(current - previous) >= minRowMove
+    }
+
     public struct Piece: Equatable, Sendable {
         public let text: String
         /// Cut from the same line as the piece before it, not started by a real "\n".

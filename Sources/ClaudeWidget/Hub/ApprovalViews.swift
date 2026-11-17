@@ -75,9 +75,8 @@ struct ApprovalSummary: View {
         if ApprovalPolicy.action(for: approval.presentation, on: .row) == .allow {
             if let mcp = MCPCall(summary: summary, request: approval.request) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: mcp.name)
-                        .font(.system(size: 12, weight: .semibold))
-                        .fixedSize(horizontal: false, vertical: true)
+                    // In columns too: it reports a width, so a zero-argument tool keeps its Allow.
+                    ColumnText(text: mcp.name)
                     ForEach(mcp.arguments.indices, id: \.self) { i in
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             KeyText(key: mcp.arguments[i].key)
@@ -152,7 +151,8 @@ struct ColumnText: View {
             }
         }
         .font(Font(Self.font as CTFont))
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // minWidth 0: never sized by its own content, so the measured width converges in one pass.
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .preference(key: LaidOutColumnsKey.self, value: columns)
     }
@@ -210,6 +210,8 @@ struct PendingRequestView: View {
     /// The subagent that asked, if one did.
     let agentType: String?
     let answer: (_ id: String, _ allow: Bool) -> Void
+    /// Reports this row's top edge, so a row that moves under the pointer resets Allow's settle time.
+    let rowTop: (_ id: String, _ top: Double) -> Void
     /// From the summary's `ColumnText`s (`LaidOutColumnsKey`).
     @State private var columns: Int?
 
@@ -233,5 +235,8 @@ struct PendingRequestView: View {
                             laidOut: ApprovalLayout.canOfferAllow(columns: columns), answer: answer)
         }
         .onPreferenceChange(LaidOutColumnsKey.self) { columns = $0 }
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { top in
+            rowTop(approval.id, Double(top))
+        }
     }
 }
