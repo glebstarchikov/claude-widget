@@ -19,7 +19,11 @@ final class UsageMonitor {
     /// How a poll that got no numbers ends.
     private enum PollEnd: Error { case expired, unavailable }
     private enum UsageReply { case ok(ProviderUsage), unauthorized, failed }
-    private enum Renewal: Equatable { case renewed(OAuthCredential), rejected, unreachable }
+    private enum Renewal: Equatable {
+        case renewed(OAuthCredential), rejected, unreachable
+        /// Failed before anything was sent (no network, no host): gives the 10-min slot back.
+        case notSent
+    }
 
     private let model: HubModel
     /// One session for usage and renewal. No URL cache or cookie store, so a
@@ -207,7 +211,7 @@ final class UsageMonitor {
         if case .renewed(let renewed) = result { return .success(renewed) }
         guard active else { return .failure(.unavailable) }
         if let adopted = await adoptClaudeCode(onlyIfNew: true) { return .success(adopted) }
-        return .failure(result == .unreachable ? .unavailable : .expired)
+        return .failure(result == .rejected ? .expired : .unavailable)
     }
 
     /// At most one renewal in flight and one per 10 minutes; inside that window
@@ -219,6 +223,7 @@ final class UsageMonitor {
             return last.reachedServer ? .rejected : .unreachable
         }
         guard active else { return .unreachable }
+        let previous = lastRenewal
         let started = Date()
         lastRenewal = (started, false)
         // Unstructured, so stopping the poll can't cancel it: once the request is
@@ -227,7 +232,8 @@ final class UsageMonitor {
         renewal = task
         let result = await task.value
         renewal = nil
-        lastRenewal = (started, result != .unreachable)
+        // Nothing was sent: give the slot back (the poll backoff still spaces attempts).
+        lastRenewal = result == .notSent ? previous : (started, result != .unreachable)
         return result
     }
 
@@ -237,7 +243,7 @@ final class UsageMonitor {
             reply = try await send(TokenRefresh.makeRequest(refreshToken: credential.refreshToken))
         } catch {
             Logger.limits.error("renewal request failed (\(Self.errorCode(error)))")
-            return .unreachable
+            return TokenRefresh.neverSent(error) ? .notSent : .unreachable
         }
         Logger.limits.notice("renewal status \(reply.status)")
         guard reply.status == 200, let renewed = try? TokenRefresh.parseResponse(reply.body, now: Date())

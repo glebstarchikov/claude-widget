@@ -59,6 +59,14 @@ public enum TokenRefresh {
         return r
     }
 
+    /// Whether a failed renewal request provably never reached the server (no
+    /// network, no host), so it needn't count against the renewal spacing. A
+    /// timeout or a dropped connection may have been delivered, so those don't.
+    public static func neverSent(_ error: Error) -> Bool {
+        guard let code = (error as? URLError)?.code else { return false }
+        return [.notConnectedToInternet, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed].contains(code)
+    }
+
     public static func parseResponse(_ data: Data, now: Date) throws -> OAuthCredential {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let access = root["access_token"] as? String, !access.isEmpty,

@@ -201,6 +201,21 @@ final class UsageTests: XCTestCase {
         }
     }
 
+    func testNeverSentOnlyForErrorsThatProveNothingWasSent() {
+        let neverSent: [URLError.Code] = [.notConnectedToInternet, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed]
+        for code in neverSent {
+            XCTAssertTrue(TokenRefresh.neverSent(URLError(code)), "\(code.rawValue)")
+        }
+        // May have reached the server (and rotated the refresh token): never released.
+        let maybeSent: [URLError.Code] = [.timedOut, .networkConnectionLost, .cancelled, .badServerResponse,
+                                          .secureConnectionFailed, .unknown]
+        for code in maybeSent {
+            XCTAssertFalse(TokenRefresh.neverSent(URLError(code)), "\(code.rawValue)")
+        }
+        XCTAssertFalse(TokenRefresh.neverSent(CancellationError()))
+        XCTAssertFalse(TokenRefresh.neverSent(TokenRefreshError.malformedResponse))
+    }
+
     // MARK: reset format
 
     func testResetFormat() {
