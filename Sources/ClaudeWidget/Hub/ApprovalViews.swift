@@ -19,6 +19,8 @@ extension PendingApproval {
 struct ApprovalButtons: View {
     let approval: PendingApproval
     let inPill: Bool
+    /// The request's text is laid out legibly (`ApprovalLayout.canOfferAllow`).
+    let laidOut: Bool
     let answer: (_ id: String, _ allow: Bool) -> Void
     var review: (_ sessionId: String) -> Void = { _ in }
     @Environment(\.colorScheme) private var colorScheme
@@ -27,11 +29,17 @@ struct ApprovalButtons: View {
         Color(nsColor: colorScheme == .dark ? Theme.accentDark : Theme.accentLight)
     }
 
+    /// Never Allow beside text that couldn't be laid out (not measured yet, or too narrow).
+    private var action: ApprovalAction {
+        let action = ApprovalPolicy.action(for: approval.presentation, on: inPill ? .pill : .row)
+        return action == .allow && !laidOut ? .open : action
+    }
+
     var body: some View {
         HStack(spacing: 6) {
             Button("Deny") { answer(approval.id, false) }
                 .buttonStyle(.glass)
-            switch ApprovalPolicy.action(for: approval.presentation, on: inPill ? .pill : .row) {
+            switch action {
             case .allow:
                 // Not .glassProminent: in this never-key panel its tint never shows
                 // and Allow looked exactly like Deny (measured); bordered keeps the indigo.
@@ -72,11 +80,7 @@ struct ApprovalSummary: View {
                         .fixedSize(horizontal: false, vertical: true)
                     ForEach(mcp.arguments.indices, id: \.self) { i in
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(verbatim: mcp.arguments[i].key + ":")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .layoutPriority(1)
+                            KeyText(key: mcp.arguments[i].key)
                             ColumnText(text: mcp.arguments[i].value)
                         }
                         .padding(.leading, 12)
@@ -92,6 +96,35 @@ struct ApprovalSummary: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+/// An MCP argument's key: its own width up to `maxWidth`, wrapping inside that
+/// column beyond it, so the value beside it always keeps the rest of the row.
+private struct KeyText: View {
+    private static let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+    private static let maxWidth: CGFloat = 160
+
+    let key: String
+
+    var body: some View {
+        let label = key + ":"
+        let natural = (label as NSString).size(withAttributes: [.font: Self.font]).width.rounded(.up) + 1
+        Text(verbatim: label)
+            .font(Font(Self.font as CTFont))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(width: min(natural, Self.maxWidth), alignment: .leading)
+    }
+}
+
+/// The fewest columns any `ColumnText` in a request was laid out in; negative
+/// until measured, nil if there's none.
+struct LaidOutColumnsKey: PreferenceKey {
+    static let defaultValue: Int? = nil
+    static func reduce(value: inout Int?, nextValue: () -> Int?) {
+        guard let next = nextValue() else { return }
+        value = min(value ?? next, next)
     }
 }
 
@@ -121,6 +154,7 @@ struct ColumnText: View {
         .font(Font(Self.font as CTFont))
         .frame(maxWidth: .infinity, alignment: .leading)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .preference(key: LaidOutColumnsKey.self, value: columns)
     }
 
     private func row(_ piece: ApprovalLayout.Piece) -> some View {
@@ -176,6 +210,8 @@ struct PendingRequestView: View {
     /// The subagent that asked, if one did.
     let agentType: String?
     let answer: (_ id: String, _ allow: Bool) -> Void
+    /// From the summary's `ColumnText`s (`LaidOutColumnsKey`).
+    @State private var columns: Int?
 
     private var label: String? {
         let parts = [agentType, approval.toolLabel].compactMap { $0 }
@@ -193,7 +229,9 @@ struct PendingRequestView: View {
                 ApprovalSummary(approval: approval)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            ApprovalButtons(approval: approval, inPill: false, answer: answer)
+            ApprovalButtons(approval: approval, inPill: false,
+                            laidOut: ApprovalLayout.canOfferAllow(columns: columns), answer: answer)
         }
+        .onPreferenceChange(LaidOutColumnsKey.self) { columns = $0 }
     }
 }

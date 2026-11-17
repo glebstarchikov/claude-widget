@@ -39,8 +39,14 @@ final class ApprovalCoordinator {
     private var timers: [String: Task<Void, Never>] = [:]
     /// Main-loop requests whose session has shown up in `model.sessions`.
     private var sessionSeen: Set<String> = []
-    /// When `model.pending` last gained or lost a request.
-    private var queueChangedAt = Date.distantPast
+    /// When (`now`) `model.pending` last gained or lost a request, or the session
+    /// rows moved while one was pending.
+    private var queueChangedAt: TimeInterval = -.infinity
+    /// Session ids in row order, as last seen.
+    private var sessionOrder: [String] = []
+
+    /// Monotonic seconds (unaffected by wall-clock changes).
+    private static var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
     private var observers: [NSObjectProtocol] = []
     /// `--auto-answer allow|deny`, for verification only (see `scheduleAutoAnswer`).
     private let autoAnswer: Bool?
@@ -92,7 +98,7 @@ final class ApprovalCoordinator {
                 Logger.approval.error("allow refused: not offered for this request")
                 return
             }
-            guard Date().timeIntervalSince(queueChangedAt) >= Self.allowSettle else {
+            guard Self.now - queueChangedAt >= Self.allowSettle else {
                 Logger.approval.notice("allow ignored: requests changed under the pointer")
                 return
             }
@@ -123,6 +129,12 @@ final class ApprovalCoordinator {
     /// A main-loop request ends once its session leaves needs-you after the request
     /// arrived (Gleb answered elsewhere, or Claude moved on), or the session is gone.
     func sessionsChanged(_ sessions: [Session]) {
+        // Rows moving under the pointer is as much a change as the requests changing.
+        let order = sessions.map(\.sessionId)
+        if order != sessionOrder {
+            sessionOrder = order
+            if !model.pending.isEmpty { queueChangedAt = Self.now }
+        }
         for approval in model.pending where approval.request.agentId == nil {
             guard let session = sessions.first(where: { $0.sessionId == approval.request.sessionId }) else {
                 if sessionSeen.contains(approval.id) { end(approval.id, .sessionMovedOn) }
@@ -171,7 +183,7 @@ final class ApprovalCoordinator {
             if !Task.isCancelled { self?.end(approval.id, .timedOut) }
         }
         model.pending.append(approval)
-        queueChangedAt = Date()
+        queueChangedAt = Self.now
         Logger.approval.notice("\(request.toolName, privacy: .public) held for an answer")
         onChange?(nil)
         scheduleAutoAnswer(approval)
@@ -193,7 +205,7 @@ final class ApprovalCoordinator {
         sessionSeen.remove(id)
         let sessionId = model.pending.first { $0.id == id }?.request.sessionId
         model.pending.removeAll { $0.id == id }
-        queueChangedAt = Date()
+        queueChangedAt = Self.now
         switch ending {
         case .answered(let allow): reply(allow ? .allow : .deny)
         case .closed: break

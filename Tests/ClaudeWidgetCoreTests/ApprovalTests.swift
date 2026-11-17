@@ -199,6 +199,13 @@ final class ApprovalTests: XCTestCase {
         assertOpenOnly(presentation("mcp__s__t", ["o": nested]), "long nested object")
     }
 
+    func testMCPKeyLengthBoundary() {
+        assertAllowable(presentation("mcp__s__t", [String(repeating: "k", count: 32): "v"]), "32-char key")
+        assertOpenOnly(presentation("mcp__s__t", [String(repeating: "k", count: 33): "v"]), "33-char key")
+        assertOpenOnly(presentation("mcp__s__t", ["clé": "v"]), "non-ASCII key")
+        assertOpenOnly(presentation("mcp__s__t", ["a\tb": "v"]), "tab in key")
+    }
+
     func testControlAndBidiCharactersAreOpenOnly() {
         for (label, x) in [("CR", "\r"), ("VT", "\u{0B}"), ("FF", "\u{0C}"), ("NEL", "\u{85}"),
                            ("LS", "\u{2028}"), ("PS", "\u{2029}"), ("RLO", "\u{202E}"),

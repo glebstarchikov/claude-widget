@@ -55,6 +55,8 @@ struct ApprovalPillView: View {
     let extra: Int
     let answer: (_ id: String, _ allow: Bool) -> Void
     let review: (_ sessionId: String) -> Void
+    /// From the summary's `ColumnText` (`LaidOutColumnsKey`).
+    @State private var columns: Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -78,7 +80,9 @@ struct ApprovalPillView: View {
                 }
                 .lineLimit(1)
                 Spacer(minLength: 8)
-                ApprovalButtons(approval: approval, inPill: true, answer: answer, review: review)
+                ApprovalButtons(approval: approval, inPill: true,
+                                laidOut: ApprovalLayout.canOfferAllow(columns: columns),
+                                answer: answer, review: review)
             }
             // The request gets the full width under the name: a one-line request
             // (≤ 60 characters) fits without a soft wrap, which could hide whether
@@ -105,5 +109,6 @@ struct ApprovalPillView: View {
         .onTapGesture {
             if let owner = approval.request.ownerBundleId { activateOwnerApp(owner) }
         }
+        .onPreferenceChange(LaidOutColumnsKey.self) { columns = $0 }
     }
 }

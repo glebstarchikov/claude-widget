@@ -59,6 +59,15 @@ final class ApprovalLayoutTests: XCTestCase {
         XCTAssertFalse(ApprovalLayout.pieces("a\n\nb", columns: 10).contains { $0.continuation })
     }
 
+    func testAllowNeedsMeasuredRoomyColumns() {
+        XCTAssertFalse(ApprovalLayout.canOfferAllow(columns: nil), "not measured yet")
+        XCTAssertFalse(ApprovalLayout.canOfferAllow(columns: -2), "measured at ~0 pt")
+        XCTAssertFalse(ApprovalLayout.canOfferAllow(columns: 0))
+        XCTAssertFalse(ApprovalLayout.canOfferAllow(columns: 7))
+        XCTAssertTrue(ApprovalLayout.canOfferAllow(columns: 8))
+        XCTAssertTrue(ApprovalLayout.canOfferAllow(columns: 62))
+    }
+
     func testColumnsBelowOneClampToOne() {
         XCTAssertEqual(rows("abc", 0), ["a", "b", "c"])
     }

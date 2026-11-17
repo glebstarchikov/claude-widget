@@ -9,6 +9,16 @@ import Foundation
 /// Columns count Characters, which is exact for printable ASCII: the only text
 /// Allow is offered for (`ApprovalPolicy.action`).
 public enum ApprovalLayout {
+    /// The narrowest column count a view may offer Allow next to.
+    public static let minColumnsForAllow = 8
+
+    /// Whether text laid out in `columns` (nil: not measured yet) is legible enough
+    /// to offer Allow beside it. A view that couldn't lay its text out never offers Allow.
+    public static func canOfferAllow(columns: Int?) -> Bool {
+        guard let columns else { return false }
+        return columns >= minColumnsForAllow
+    }
+
     public struct Piece: Equatable, Sendable {
         public let text: String
         /// Cut from the same line as the piece before it, not started by a real "\n".

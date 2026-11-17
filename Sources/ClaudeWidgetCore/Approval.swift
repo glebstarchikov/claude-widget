@@ -117,6 +117,7 @@ public enum ApprovalPolicy {
     static let oneLineChars = 60
     static let maxMCPArgLines = 3
     static let maxMCPValueChars = 80
+    static let maxMCPKeyChars = 32
 
     /// Tools whose prompts are questions or plans, not permission: the hook never forwards them.
     public static func hookSkips(toolName: String) -> Bool {
@@ -166,7 +167,9 @@ public enum ApprovalPolicy {
                     let data = (try? JSONSerialization.data(withJSONObject: input[key] ?? NSNull(), options: [.sortedKeys, .fragmentsAllowed])) ?? Data()
                     value = String(data: data, encoding: .utf8) ?? ""
                 }
+                // Keys are short printable ASCII, so a key can never crowd its value off the row.
                 guard value.unicodeScalars.count <= maxMCPValueChars, isPlainText(key), isPlainText(value),
+                      key.unicodeScalars.count <= maxMCPKeyChars, isPrintableASCII(key),
                       !key.contains(where: \.isNewline), !value.contains(where: \.isNewline) else { return openOnly }
                 lines.append("\(key): \(value)")
             }
