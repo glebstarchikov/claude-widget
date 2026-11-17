@@ -2,6 +2,12 @@
 # Replays a fake Claude Code session through the real hook binary.
 # Usage: scripts/simulate.sh            full lifecycle (start → work → permission → work → stop → end)
 #        scripts/simulate.sh finished   long-task Stop transition (tests the "Finished" peek)
+#        scripts/simulate.sh approve [bash|multiline|edit|mcp]
+#            one permission request through the real hook and the app's approval socket.
+#            The hook's stdout (Claude Code's allow/deny JSON, or nothing) is passed
+#            through unchanged; progress goes to stderr. The fake session claims to
+#            belong to $OWNER (default com.apple.Terminal), so the app holds the
+#            request only while that app isn't frontmost. Ends the session afterwards.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 HOOK=".build/debug/claude-widget-hook"
@@ -28,6 +34,26 @@ EOF
   fire Stop "" 6
   fire SessionEnd "" 0
   echo "done: you should have seen the Finished peek"
+  exit 0
+fi
+
+if [ "${1:-}" = "approve" ]; then
+  case "${2:-bash}" in
+    bash)      TOOL=Bash; INPUT='{"command":"npm test","description":"Run the test suite"}' ;;
+    multiline) TOOL=Bash; INPUT='{"command":"npm ci\nnpm run build\nnpm test"}' ;;
+    edit)      TOOL=Edit; INPUT="{\"file_path\":\"$CWD/src/page.tsx\",\"old_string\":\"Hello\",\"new_string\":\"Hello, world\"}" ;;
+    mcp)       TOOL=mcp__github__create_issue
+               INPUT='{"repo":"glebstarchikov/demo-project","title":"Notch approvals: a long title that has to wrap onto a second line here","labels":["bug","ui"]}' ;;
+    *) echo "unknown request kind: $2 (bash|multiline|edit|mcp)" >&2; exit 2 ;;
+  esac
+  OWNER="${OWNER:-com.apple.Terminal}"
+  end_session() { echo "{\"session_id\":\"$SID\",\"cwd\":\"$CWD\"}" | "$HOOK" SessionEnd; }
+  trap end_session EXIT
+  echo "→ PermissionRequest $TOOL (session $SID, owner $OWNER)" >&2
+  START=$(date +%s)
+  echo "{\"session_id\":\"$SID\",\"cwd\":\"$CWD\",\"tool_name\":\"$TOOL\",\"tool_input\":$INPUT}" \
+    | __CFBundleIdentifier="$OWNER" "$HOOK" PermissionRequest
+  echo "← hook exited after $(( $(date +%s) - START )) s" >&2
   exit 0
 fi
 

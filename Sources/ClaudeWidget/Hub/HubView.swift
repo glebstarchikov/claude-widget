@@ -5,6 +5,9 @@ import ClaudeWidgetCore
 enum HubLayout {
     static let width: CGFloat = 660
     static let pillSize = CGSize(width: 380, height: 48)
+    /// The pill with a permission request: 60 monospaced characters (~445 pt) fit
+    /// on its request line without wrapping.
+    static let approvalPillWidth: CGFloat = 540
     static let cornerRadius: CGFloat = 24
     static let moduleSpacing: CGFloat = 10
     static let modulePadding: CGFloat = 12
@@ -31,6 +34,8 @@ struct HubView: View {
     @ObservedObject var model: HubModel
     /// Reports the expanded hub's height so the panel knows where it is.
     let onHubHeightChange: (CGFloat) -> Void
+    /// Reports the pill's size (the one with a request is bigger than the plain one).
+    let onPillSizeChange: (CGSize) -> Void
 
     @State private var scrollOffset: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -61,7 +66,9 @@ struct HubView: View {
                             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: HubLayout.cornerRadius,
                                                                         style: .continuous))
                     }
-                    AgentsModule(sessions: model.sessions, scrollOffset: $scrollOffset)
+                    AgentsModule(sessions: model.sessions, pending: model.pending,
+                                 answer: model.answerApproval, reveal: model.revealSessionId,
+                                 scrollOffset: $scrollOffset)
                         .padding(HubLayout.modulePadding)
                         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: HubLayout.cornerRadius,
                                                                     style: .continuous))
@@ -69,9 +76,16 @@ struct HubView: View {
                 .frame(width: HubLayout.width)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { onHubHeightChange($0) }
                 .transition(transition)
+            } else if case .needsYou? = model.pill, let first = model.pending.first {
+                ApprovalPillView(approval: first, extra: model.pending.count - 1,
+                                 answer: model.answerApproval, review: model.reviewApproval)
+                    .glassEffect(.regular, in: Capsule())
+                    .onGeometryChange(for: CGSize.self) { $0.size } action: { onPillSizeChange($0) }
+                    .transition(transition)
             } else if let pill = model.pill, let session = pillSession {
                 PillView(pill: pill, session: session)
                     .glassEffect(.regular, in: Capsule())
+                    .onGeometryChange(for: CGSize.self) { $0.size } action: { onPillSizeChange($0) }
                     .transition(transition)
             }
         }
@@ -79,5 +93,6 @@ struct HubView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(animation, value: model.expanded)
         .animation(animation, value: model.pill)
+        .animation(animation, value: model.pending)
     }
 }

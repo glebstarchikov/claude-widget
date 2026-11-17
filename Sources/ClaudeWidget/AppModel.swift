@@ -11,7 +11,7 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(hubHoverEnabled, forKey: "hubHoverEnabled") }
     }
 
-    /// Answer permission prompts from the notch. Persisted only for now.
+    /// Answer permission prompts from the notch (ApprovalCoordinator); off passes every request back to Claude Code.
     @Published var answerFromNotch: Bool {
         didSet { UserDefaults.standard.set(answerFromNotch, forKey: "answerFromNotchEnabled") }
     }

@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: SettingsWindowController!
     private var usage: UsageMonitor!
     private var limitsToggle: AnyCancellable?
+    private var approvals: ApprovalCoordinator!
+    private var approvalsToggle: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: [
@@ -47,11 +49,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if enabled { self?.usage.start() } else { self?.usage.stop() }
         }
 
+        approvals = ApprovalCoordinator(model: hubModel, appModel: model)
+        hubModel.answerApproval = { [weak self] id, allow in self?.approvals.answer(id: id, allow: allow) }
+        hubModel.reviewApproval = { [weak self] sessionId in self?.hub.review(sessionId: sessionId) }
+        approvals.onChange = { [weak self] dismissing in self?.hub.approvalsChanged(dismissing: dismissing) }
+        approvalsToggle = model.$answerFromNotch.sink { [weak self] enabled in
+            self?.approvals.settingChanged(enabled: enabled)
+        }
+        approvals.start()
+
         monitor = SessionMonitor()
         monitor.onChange = { [weak self] _, new, peeks in
             guard let self else { return }
             let aggregate = Aggregator.aggregate(new)
             self.hubModel.sessions = new
+            self.approvals.sessionsChanged(new)
             self.statusController.applyState(aggregate)
             self.hub.resolvePills(aggregate: aggregate)
             for peek in peeks {
@@ -67,6 +79,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         monitor.start()
 
         if CommandLine.arguments.contains("--show-hub") { hub.showExpanded() }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        approvals.stop()
     }
 
     private func showStatusMenu() {

@@ -42,6 +42,7 @@ final class HubController {
     private var notch: NotchMetrics?
     private var placement: Placement?
     private var hubHeight: CGFloat = 0
+    private var pillSize = HubLayout.pillSize
     private var dwell: (zone: NSRect, task: Task<Void, Never>)?
     private var closeTask: Task<Void, Never>?
     private var pillHideTask: Task<Void, Never>?
@@ -61,9 +62,10 @@ final class HubController {
 
     func start() {
         panel = makePanel()
-        let host = FirstClickHostingView(rootView: HubView(model: model) { [weak self] height in
-            self?.hubHeight = height
-        })
+        let host = FirstClickHostingView(rootView: HubView(
+            model: model,
+            onHubHeightChange: { [weak self] height in self?.hubHeight = height },
+            onPillSizeChange: { [weak self] size in self?.pillSize = size }))
         host.sizingOptions = []   // the controller sizes the panel, never SwiftUI
         panel.contentView = host
         notch = NotchMetrics()
@@ -135,11 +137,13 @@ final class HubController {
     }
 
     /// Drops pills that no longer apply: a needs-you pill once its session
-    /// stops needing you, a finished pill once its session is gone.
+    /// stops needing you (and no permission request is live), a finished pill
+    /// once its session is gone.
     func resolvePills(aggregate: AggregateState) {
         guard let pill = model.pill else { return }
         switch pill {
         case .needsYou(let id):
+            if !model.pending.isEmpty { return }   // it shows the oldest request
             let stillNeeded = aggregate == .needsYou
                 && model.sessions.contains { $0.sessionId == id && $0.state == .needsYou }
             if stillNeeded { return }
@@ -157,6 +161,31 @@ final class HubController {
         updateMouseGate()
     }
 
+    /// Keeps the pill in step with `model.pending` (ApprovalCoordinator): it shows
+    /// the oldest request. When the last one goes, one Gleb dealt with (`dismissing`
+    /// its session) takes its pill along; otherwise the plain needs-you pill stays
+    /// while the session still needs you.
+    func approvalsChanged(dismissing sessionId: String?) {
+        if let first = model.pending.first {
+            showPill(.needsYou(sessionId: first.request.sessionId))
+            return
+        }
+        if let sessionId, case .needsYou(sessionId)? = model.pill {
+            model.pill = model.sessions
+                .first { $0.state == .needsYou && $0.sessionId != sessionId }
+                .map { .needsYou(sessionId: $0.sessionId) }
+        }
+        resolvePills(aggregate: Aggregator.aggregate(model.sessions))
+        updateMouseGate()
+    }
+
+    /// The pill's Review button: opens the hub where the pill is, at the request's row.
+    func review(sessionId: String) {
+        guard let place = placement ?? notch.map(notchPlacement) ?? pointerPlacement() else { return }
+        model.revealSessionId = sessionId
+        expand(at: place, byHover: false)
+    }
+
     /// Closes the expanded hub; a pending pill shows again.
     func close() {
         guard model.expanded else { return }
@@ -164,6 +193,7 @@ final class HubController {
         closeTask?.cancel(); closeTask = nil
         pressInHub = false
         model.expanded = false
+        model.revealSessionId = nil
         updateMouseGate()
     }
 
@@ -186,7 +216,9 @@ final class HubController {
         }
 
         if let pill = pillFrame, Self.pointer(p, in: pill), let placement {
-            startDwell(in: pill, for: Self.pillDwell) { placement }
+            // A pill with Allow/Deny stays put under the pointer; Review opens the hub.
+            if showsApprovalPill { dwell?.task.cancel(); dwell = nil }
+            else { startDwell(in: pill, for: Self.pillDwell) { placement } }
         } else if appModel.hubHoverEnabled, let notch, Self.pointer(p, in: notch.hoverZone) {
             startDwell(in: notch.hoverZone, for: Self.openDwell) { [weak self] in
                 guard let self, !Self.activeAppIsFullscreen(on: notch.screen) else { return nil }
@@ -300,13 +332,19 @@ final class HubController {
                       width: HubLayout.width, height: hubHeight)
     }
 
+    /// The needs-you pill is showing a permission request (HubView).
+    private var showsApprovalPill: Bool {
+        if case .needsYou? = model.pill { return !model.pending.isEmpty }
+        return false
+    }
+
     /// Where the pill is (or returns to once the hub closes).
     private var pillFrame: NSRect? {
         guard let placement, let pill = model.pill,
-              model.sessions.contains(where: { $0.sessionId == pill.sessionId }) else { return nil }
-        let size = HubLayout.pillSize
-        return NSRect(x: placement.midX - size.width / 2, y: placement.top - size.height,
-                      width: size.width, height: size.height)
+              showsApprovalPill || model.sessions.contains(where: { $0.sessionId == pill.sessionId })
+        else { return nil }
+        return NSRect(x: placement.midX - pillSize.width / 2, y: placement.top - pillSize.height,
+                      width: pillSize.width, height: pillSize.height)
     }
 
     private var keepZones: [NSRect] {

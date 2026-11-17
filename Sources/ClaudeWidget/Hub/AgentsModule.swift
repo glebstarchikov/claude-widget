@@ -2,10 +2,15 @@ import SwiftUI
 import AppKit
 import ClaudeWidgetCore
 
-/// The hub's Agents module: one row per session, subagents nested below.
-/// Rows beyond the list cap scroll; the scroll offset survives closing the hub.
+/// The hub's Agents module: one row per session, subagents and pending
+/// permission requests nested below. Rows beyond the list cap scroll; the
+/// scroll offset survives closing the hub.
 struct AgentsModule: View {
     let sessions: [Session]
+    let pending: [PendingApproval]
+    let answer: (_ id: String, _ allow: Bool) -> Void
+    /// A session row to open scrolled to (the pill's Review), instead of the remembered offset.
+    let reveal: String?
     @Binding var scrollOffset: CGFloat
 
     var body: some View {
@@ -23,7 +28,7 @@ struct AgentsModule: View {
             CappedHeight(maxHeight: HubLayout.maxListHeight) {
                 ViewThatFits(in: .vertical) {
                     rows
-                    RememberedScroll(offset: $scrollOffset) { rows }
+                    RememberedScroll(offset: $scrollOffset, reveal: reveal) { rows }
                 }
             }
         }
@@ -31,8 +36,14 @@ struct AgentsModule: View {
 
     private var rows: some View {
         VStack(spacing: 0) {
-            ForEach(sessions, id: \.sessionId) { SessionRow(session: $0) }
+            ForEach(sessions, id: \.sessionId) { session in
+                SessionRow(session: session,
+                           pending: pending.filter { $0.request.sessionId == session.sessionId },
+                           answer: answer)
+                    .id(session.sessionId)
+            }
         }
+        .scrollTargetLayout()
     }
 }
 
@@ -51,16 +62,17 @@ private struct CappedHeight: Layout {
     }
 }
 
-/// A vertical scroll view that starts at `offset` and keeps it updated, so a
-/// re-created hub reopens where it was left.
+/// A vertical scroll view that starts at `offset` (or at the `reveal` row) and
+/// keeps `offset` updated, so a re-created hub reopens where it was left.
 private struct RememberedScroll<Content: View>: View {
     @Binding var offset: CGFloat
     @State private var position: ScrollPosition
     private let content: Content
 
-    init(offset: Binding<CGFloat>, @ViewBuilder content: () -> Content) {
+    init(offset: Binding<CGFloat>, reveal: String?, @ViewBuilder content: () -> Content) {
         _offset = offset
-        _position = State(initialValue: ScrollPosition(y: offset.wrappedValue))
+        _position = State(initialValue: reveal.map { ScrollPosition(id: $0, anchor: .top) }
+                          ?? ScrollPosition(y: offset.wrappedValue))
         self.content = content()
     }
 
@@ -78,6 +90,9 @@ struct SessionRow: View {
     static let verticalPadding: CGFloat = 7
 
     let session: Session
+    /// This session's live permission requests, oldest first.
+    let pending: [PendingApproval]
+    let answer: (_ id: String, _ allow: Bool) -> Void
     @State private var hovering = false
     @Environment(\.colorScheme) private var colorScheme
 
@@ -153,6 +168,17 @@ struct SessionRow: View {
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                         .frame(minWidth: 36, alignment: .trailing)
+                }
+
+                ForEach(pending) { approval in
+                    PendingRequestView(
+                        approval: approval,
+                        agentType: approval.request.agentId.flatMap { id in
+                            session.subagents.first { $0.agentId == id }?.agentType
+                        },
+                        answer: answer)
+                        .padding(.leading, 26)   // under the project name
+                        .padding(.vertical, 2)
                 }
 
                 ForEach(session.subagents, id: \.agentId) { sub in
