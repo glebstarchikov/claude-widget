@@ -8,6 +8,8 @@ public enum WidgetConstants {
     public static let finishedPeekAutoHide: TimeInterval = 5
     public static let staleAfter: TimeInterval = 4 * 3600
     public static let gcInterval: TimeInterval = 3600
+    public static let approvalAckTimeout: TimeInterval = 0.5
+    public static let approvalDecisionTimeout: TimeInterval = 30
 
     public static var baseDir: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -15,6 +17,12 @@ public enum WidgetConstants {
     }
     public static var stateDir: URL {
         baseDir.appendingPathComponent("state", isDirectory: true)
+    }
+    public static var runDir: URL {
+        baseDir.appendingPathComponent("run", isDirectory: true)
+    }
+    public static var approvalSocket: URL {
+        runDir.appendingPathComponent("approve.sock")
     }
     public static var binDir: URL {
         baseDir.appendingPathComponent("bin", isDirectory: true)
