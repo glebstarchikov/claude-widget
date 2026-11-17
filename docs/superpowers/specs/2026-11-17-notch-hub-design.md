@@ -49,7 +49,7 @@ Project 1 must lay out the hub so projects 2–4 slot in without re-layout (see 
 - The hub takes keyboard focus or interrupts typing in another app.
 - Claude gets slower, or hangs, because of the widget — especially when the app isn't running.
 - Anything gets approved without Gleb clicking Allow.
-- The widget refreshes or rotates Claude Code's sign-in (could log Claude Code out).
+- The widget writes Claude Code's own Keychain entry (it holds Claude Code's MCP sign-ins too), or ever loses a renewed sign-in silently. (Renewing the sign-in itself is accepted — see §7.)
 - Solid custom colors painted over glass (it looks off; glass is the surface now).
 
 ## 4. Approaches considered
@@ -111,20 +111,23 @@ Projects 2–4 will add a now-playing module beside Limits and turn Agents into 
 
 ## 7. Claude limits (usage feed) [Gleb chose the feed]
 
-**Reading the sign-in** [proposed]:
-- Read via `/usr/bin/security find-generic-password -s "Claude Code-credentials" -w` rather than the Keychain API. Claude Code writes this item with the `security` tool, so its access list likely already trusts it → no macOS prompt, and it survives rebuilds of the ad-hoc-signed app (a Keychain-API read would re-prompt after every rebuild because ad-hoc signatures change). **Verify on first build**; if macOS still prompts, document it.
-- The item's value is JSON; use `claudeAiOauth.accessToken`. Hold the token in memory only for the request. Never log it, print it, write it to disk, or send it anywhere but `api.anthropic.com`.
-- **Don't trust `expiresAt`.** On Gleb's Mac (checked 2026-11-17, values only, token never printed) the item exists, `expiresAt` is `0`, `refreshTokenExpiresAt` is a few days out, `subscriptionType` is `max`, and reading it with `/usr/bin/security` from a shell raised no prompt. So: if `expiresAt` is a real past time, skip the call; otherwise just call, and treat 401/403 as "expired".
-- **Never refresh the token.** On expiry show "Sign-in expired · open Claude Code" (Claude Code refreshes it on its next run).
-- **First build task includes one live call** (§11) to confirm the token works while Gleb uses the desktop app and to pin the response shape. If it doesn't work, stop and bring it back to Gleb before building the limits module — a second source (status line) is his call, not the builder's.
+**Revised 2026-11-17 after live measurement (see §15).** The desktop app keeps its sign-in to itself, and terminal Claude's saved sign-in only stays fresh while terminal Claude is used. A `claude setup-token` year-long token is rejected by the usage feed (403). So **the widget renews a sign-in itself** [Gleb: "lets do the limits", accepting the renewal route] and **keeps its own copy** [Gleb: "Yes, own copy"].
 
-**Request:** `GET https://api.anthropic.com/api/oauth/usage` with `Authorization: Bearer <token>` and `anthropic-beta: oauth-2025-04-20`. Expected (per third-party docs, **verify against a live response at build time without logging the token**): `five_hour` and `seven_day` objects with `utilization` (%) and `resets_at`; optional `seven_day_opus` / `seven_day_sonnet` / `extra_usage` may be null or absent. Missing windows are hidden; unknown fields ignored.
+**The sign-in the widget uses:**
+- **Its own Keychain entry**, service `Claude Widget-usage-credentials`, account = the macOS user name, value = small JSON `{"accessToken","refreshToken","expiresAt"}` (≈ 0.5 KB). Written and read only through `/usr/bin/security` (write: `security -i` with `add-generic-password -U … -X <hex>` on **stdin**, so no secret ever appears in a process's arguments; items made by the `security` tool don't re-prompt after rebuilds of the ad-hoc-signed app). Every write is verified: check the exit status and stderr, then read back and compare. A failed write must never be silent.
+- **Adoption:** when the widget has no entry of its own, it reads Claude Code's `Claude Code-credentials` entry **read-only** (`claudeAiOauth.accessToken` / `refreshToken` / `expiresAt`) and saves a copy as its own. It **never writes Claude Code's entry**: that entry is ~33 KB (it also holds Claude Code's MCP sign-ins), `security -i` can't save values that large, and writing it back could wipe an MCP sign-in Claude Code saved in between.
+- **Renewal:** when the access token is within 5 min of expiry, or the usage feed answers 401/403, renew once: `POST https://platform.claude.com/v1/oauth/token`, JSON `{"grant_type":"refresh_token","refresh_token":…,"client_id":"9d1c250a-e61b-44d9-88ed-5944d1962f5e"}`, `User-Agent: claude-widget/1.0 (macOS)` (the endpoint rejects generic agents). Save the new access token, the **rotated** refresh token and the new expiry to the widget's own entry **before** using them, then retry the usage call once. Only one renewal in flight at a time.
+- **Known consequence** [Gleb accepted]: renewing rotates the refresh token, so terminal Claude's saved copy stops working after the widget's first renewal; terminal Claude then asks for `/login` the next time it renews.
+- **When renewal fails** (invalid/revoked refresh token): re-read Claude Code's entry; if its refresh token differs from the one the widget last adopted (Gleb ran `/login` again), adopt it and retry; otherwise show **"Sign-in expired · run /login in terminal Claude"** and retry every 30 min.
+- Tokens live in memory only as long as a request needs them. Never log, print, or send them anywhere but `api.anthropic.com` (usage) and `platform.claude.com` (renewal).
 
-**Polling:** every 5 min while the app runs; also on hub open if the last success is > 60 s old. On network/5xx/429: exponential backoff up to 30 min. On 401/403: stop polling and show the expired/denied state; retry when the Keychain item's value changes or every 30 min.
+**Request:** `GET https://api.anthropic.com/api/oauth/usage` with `Authorization: Bearer <token>`, `anthropic-beta: oauth-2025-04-20` and the same User-Agent. The response's **`limits` array** is the primary source — one window per entry: `{kind, group, percent, severity, resets_at, scope{model{display_name}}, is_active}` (live on 2026-11-17: weekly_all 78 % "warning"; weekly_scoped Fable 100 % "critical", active). Fallback when `limits` is absent: `five_hour` / `seven_day` `{utilization, resets_at}` (`five_hour` can be null). Unknown fields ignored.
+
+**Polling:** every 5 min while the app runs; also on hub open if the last success is > 60 s old. On network/5xx/429: exponential backoff up to 30 min. On 401/403: renew once (above); if that fails, the expired state.
 
 **Caching:** last good result (numbers + timestamp, no secrets) in `~/.claude/claude-widget/limits.json`, so the module shows last-known values with "updated 12m ago" after a relaunch.
 
-**Display:** two rings (5h, week) + "5h resets in 2h 10m". Failure states never break the rest of the hub: "Limits unavailable" in secondary text.
+**Display:** one ring per window from the feed (e.g. "week 78 %", "Fable · week 100 %"), the active limit emphasized, and "resets in …" for the soonest reset. Failure states never break the rest of the hub: "Limits unavailable" in secondary text.
 
 **Openness for later providers** [proposed]: the model is a list of `{provider, windows: [{label, percent, resetsAt}]}` and the module renders whatever providers exist. No plugin protocol now — just a data shape Codex can fill later.
 
@@ -191,7 +194,7 @@ Hooks fire in the terminal, IDE extensions and the desktop app. **Not documented
 | Subagent asks permission | same flow; row shows under its parent session |
 | `AskUserQuestion` / `ExitPlanMode` | hook passes immediately; pill shows info-only needs-you |
 | Usage feed changes shape / goes away | "Limits unavailable"; nothing else affected |
-| Sign-in expired | "Sign-in expired · open Claude Code"; no refresh attempt |
+| Sign-in expired | renew once; if renewal fails and terminal Claude has no newer sign-in: "Sign-in expired · run /login in terminal Claude" |
 | Display change / lid close while hub open | hub closes; geometry recomputed (as `NotchMetrics` does today) |
 | Fullscreen app | hover-open disabled; pills still shown (window recipe from `macos-menubar-app-gotchas`: `.screenSaver` level + `.canJoinAllSpaces`, no `.fullScreenAuxiliary`) |
 | Reduce Motion | fades only |
@@ -222,7 +225,7 @@ Hooks fire in the terminal, IDE extensions and the desktop app. **Not documented
 2. In another app, a Claude permission prompt shows the pill with Allow/Deny within ~0.5 s; Allow lets Claude continue without touching the terminal; Deny gives Claude the denial.
 3. With the app quit, Claude's prompts behave exactly as without the widget (no noticeable delay).
 4. Switching to the session's app while a request is pending makes the normal prompt appear right away.
-5. The limits module shows 5-hour and weekly % within a few points of claude.ai's usage page, with reset time; shows last-known values after relaunch; shows "unavailable" on failure with everything else working.
+5. The limits module shows the same limits and % as claude.ai's usage page, with reset time; keeps working across an 8-hour access-token expiry (it renews itself); shows last-known values after relaunch; shows "unavailable" on failure with everything else working.
 6. Typing in another app is never interrupted by the hub or pills.
 7. With no notch, clicking the critter opens the hub under it.
 8. `swift build && swift test` green.
@@ -237,3 +240,21 @@ Exact sizes, paddings, spring constants (start from the spike values above), typ
 - **Prompt timing with a synchronous hook** is undocumented — measured in the first task.
 - **Keychain prompt assumption** (reading via `/usr/bin/security` avoids a prompt) — verified on first build.
 - **Ad-hoc signing** — unchanged from today; matters only for distribution.
+
+## 15. Measurement results (2026-11-17)
+
+**Limits (go, via renewal — §7):**
+
+| Check | Result |
+|---|---|
+| Terminal Claude's saved sign-in before `/login` | empty (cleared 2026-11-16); usage feed → 401 |
+| Desktop-app sessions | no token in the hook environment (the host refreshes auth); `ANTHROPIC_BASE_URL` is `https://api.anthropic.com` |
+| `claude setup-token` year-long token | usage feed → **403** (scope too narrow) — route rejected |
+| Terminal Claude's sign-in after `/login` | usage feed → **200**; access token ≈ 8 h, refresh token ≈ 30 days |
+| Renewal `POST platform.claude.com/v1/oauth/token` | 403 with Python's default User-Agent; **200** with `claude-widget/0.1 (macOS)`; fields `access_token, refresh_token (rotated), expires_in=28800, refresh_token_expires_in, scope, token_type, token_uuid, account, organization` |
+| Saving back to Keychain | blocked inside the Bash sandbox; outside it `security -i` on stdin saves ~1 KB values but **fails at 33 KB** (Claude Code's entry is 33,290 bytes) — hence the widget's own small entry |
+| Usage feed shape | `limits` array (kind, group, percent, severity, resets_at, scope.model.display_name, is_active) + `five_hour`/`seven_day` objects + ~30 ignorable keys |
+
+Incident during the renewal test: the renewed sign-in was not saved (sandbox + an unchanged-value write check that couldn't detect failure), so terminal Claude's refresh token was lost and it needs `/login` again. Lesson folded into §7: every Keychain write is verified with exit status, stderr and a read-back.
+
+**Answer from the notch (pending):** the terminal run was impossible (terminal Claude logged out); the desktop-app probe at `/tmp/claude/hook-test` is waiting for Gleb's run.
