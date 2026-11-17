@@ -119,30 +119,56 @@ public enum ApprovalPolicy {
         else { return openOnly }
 
         func single(_ text: String?, limit: Int = .max) -> ApprovalPresentation {
-            guard let text, !text.isEmpty, text.count <= limit else { return openOnly }
-            return .allowable(summary: text, fitsOneLine: !text.contains("\n") && text.count <= oneLineChars)
+            guard let text, !text.isEmpty, text.count <= limit, isPlainText(text) else { return openOnly }
+            let oneLine = !text.contains(where: \.isNewline) && !text.contains("\t") && text.count <= oneLineChars
+            return .allowable(summary: text, fitsOneLine: oneLine)
         }
 
         switch name {
-        case "Bash": return single(input["command"] as? String, limit: maxBashChars)
+        case "Bash":
+            // Anything that changes how the command runs must be visible, so only
+            // known-harmless keys (and the two flags when false) stay one-click.
+            for (key, value) in input {
+                switch key {
+                case "command", "description", "timeout": continue
+                case "dangerouslyDisableSandbox", "run_in_background":
+                    if (value as? Bool) == false { continue }
+                    return openOnly
+                default: return openOnly
+                }
+            }
+            return single(input["command"] as? String, limit: maxBashChars)
         case "WebFetch": return single(input["url"] as? String)
         case "WebSearch": return single(input["query"] as? String)
         default: break
         }
         if name.hasPrefix("mcp__") {
-            let lines = input.keys.sorted().map { key -> String in
+            var lines: [String] = []
+            for key in input.keys.sorted() {
                 let value: String
                 if let s = input[key] as? String { value = s } else {
                     let data = (try? JSONSerialization.data(withJSONObject: input[key] ?? NSNull(), options: [.sortedKeys, .fragmentsAllowed])) ?? Data()
                     value = String(data: data, encoding: .utf8) ?? ""
                 }
-                let shown = value.count > maxMCPValueChars ? String(value.prefix(maxMCPValueChars)) + "…" : value
-                return "\(key): \(shown)"
+                guard value.count <= maxMCPValueChars, isPlainText(key), isPlainText(value) else { return openOnly }
+                lines.append("\(key): \(value)")
             }
-            guard lines.count <= maxMCPArgLines else { return openOnly }
-            let summary = ([name] + lines).joined(separator: "\n")
-            return .allowable(summary: summary, fitsOneLine: lines.isEmpty)
+            let visibleLines = lines.joined(separator: "\n").split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+            guard !lines.isEmpty ? visibleLines.count <= maxMCPArgLines : true else { return openOnly }
+            return .allowable(summary: ([name] + lines).joined(separator: "\n"), fitsOneLine: lines.isEmpty)
         }
         return openOnly
+    }
+
+    /// Newline and tab are fine; any other control, format (incl. bidi) or
+    /// line/paragraph-separator scalar could make the display differ from what runs.
+    static func isPlainText(_ text: String) -> Bool {
+        text.unicodeScalars.allSatisfy { scalar in
+            if scalar == "\n" || scalar == "\t" { return true }
+            switch scalar.properties.generalCategory {
+            case .control, .format, .lineSeparator, .paragraphSeparator: return false
+            default: return true
+            }
+        }
     }
 }
