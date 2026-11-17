@@ -15,6 +15,9 @@ public enum WidgetConstants {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/claude-widget", isDirectory: true)
     }
+    public static var limitsCache: URL {
+        baseDir.appendingPathComponent("limits.json")
+    }
     public static var stateDir: URL {
         baseDir.appendingPathComponent("state", isDirectory: true)
     }
