@@ -15,6 +15,19 @@ func readTranscriptTail(_ path: String, maxBytes: UInt64 = 1_048_576) -> [String
     return lines
 }
 
+/// Asks the widget app to decide a permission request. Prints Claude Code's
+/// decision JSON on allow/deny; prints nothing (falls through to the normal
+/// prompt) when the app is absent, slow, or gives no explicit answer.
+func askWidgetForDecision(payload: HookPayload, ownerBundleId: String?) {
+    guard !ApprovalPolicy.hookSkips(toolName: payload.toolName ?? "") else { return }
+    let request = ApprovalRequest(payload: payload, ownerBundleId: ownerBundleId, id: UUID().uuidString)
+    switch ApprovalClient.run(socketPath: WidgetConstants.approvalSocket.path, request: request) {
+    case .allow: print(HookDecision.allowJSON)
+    case .deny: print(HookDecision.denyJSON)
+    case .noDecision: break
+    }
+}
+
 let arguments = CommandLine.arguments
 guard arguments.count >= 2 else { exit(0) }
 let event = arguments[1]
@@ -30,6 +43,9 @@ if let agentId = payload.agentId {
     // the parent session's file.
     let previous = store.readSubagent(agentId: agentId)
     try? store.applySubagent(EventMapper.mapSubagent(event: event, payload: payload, previous: previous, now: now))
+    if event == "PermissionRequest" {
+        askWidgetForDecision(payload: payload, ownerBundleId: ProcessInfo.processInfo.environment["__CFBundleIdentifier"])
+    }
 } else {
     let previous = store.read(sessionId: payload.sessionId)
     var update = EventMapper.map(event: event, payload: payload, previous: previous, now: now)
@@ -45,5 +61,8 @@ if let agentId = payload.agentId {
         update = .write(session)
     }
     try? store.apply(update)
+    if event == "PermissionRequest" {
+        askWidgetForDecision(payload: payload, ownerBundleId: ProcessInfo.processInfo.environment["__CFBundleIdentifier"])
+    }
 }
 exit(0)
