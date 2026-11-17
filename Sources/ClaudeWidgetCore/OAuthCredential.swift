@@ -1,7 +1,7 @@
 import Foundation
 
 /// A Claude sign-in. Never print or log the tokens: both descriptions are redacted.
-public struct OAuthCredential: Codable, Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible {
+public struct OAuthCredential: Codable, Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
     public var accessToken: String
     public var refreshToken: String
     public var expiresAt: Date
@@ -14,6 +14,10 @@ public struct OAuthCredential: Codable, Equatable, Sendable, CustomStringConvert
 
     public var description: String { "OAuthCredential(expiresAt: \(expiresAt), tokens: <redacted>)" }
     public var debugDescription: String { description }
+    // Keeps dump() and Mirror from listing the stored token properties.
+    public var customMirror: Mirror {
+        Mirror(self, children: ["expiresAt": expiresAt, "tokens": "<redacted>"], displayStyle: .struct)
+    }
 }
 
 public enum CredentialParser {

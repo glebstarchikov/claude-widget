@@ -148,6 +148,18 @@ final class UsageTests: XCTestCase {
             XCTAssertFalse(s.contains("RRR-secret"), s)
             XCTAssertTrue(s.contains("redacted"), s)
         }
+        var dumped = ""
+        dump(c, to: &dumped)
+        XCTAssertFalse(dumped.contains("AAA-secret"), dumped)
+        XCTAssertFalse(dumped.contains("RRR-secret"), dumped)
+        XCTAssertTrue(dumped.contains("expiresAt"), dumped)
+        let children = Mirror(reflecting: c).children
+        for child in children {
+            let value = String(describing: child.value) + String(reflecting: child.value)
+            XCTAssertFalse(value.contains("AAA-secret"), value)
+            XCTAssertFalse(value.contains("RRR-secret"), value)
+        }
+        XCTAssertTrue(children.contains { $0.label == "expiresAt" })
     }
 
     // MARK: token refresh
