@@ -2,22 +2,29 @@ import XCTest
 @testable import ClaudeWidgetCore
 
 /// Scripted stand-in for the app: accepts one connection, reads the request line, plays the steps.
-private final class FakeServer {
+/// Listens in a fresh directory of its own, or at `path` (left for the caller to clean up).
+final class FakeServer {
     enum Step { case write(String), sleep(TimeInterval), close }
 
     let path: String
-    private let dir: String
+    private let dir: String?
     private let listenFD: Int32
     private let done = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     private var _received: ApprovalRequest?
     var received: ApprovalRequest? { lock.lock(); defer { lock.unlock() }; return _received }
 
-    init(steps: [Step], readsRequest: Bool = true) throws {
-        dir = "/tmp/cw-\(UUID().uuidString.prefix(8))"
-        path = dir + "/a.sock"
-        precondition(path.utf8.count < 104)
-        listenFD = try UnixSocket.listen(path: path)
+    init(steps: [Step], readsRequest: Bool = true, path: String? = nil) throws {
+        if let path {
+            dir = nil
+            self.path = path
+        } else {
+            let dir = "/tmp/cw-\(UUID().uuidString.prefix(8))"
+            self.dir = dir
+            self.path = dir + "/a.sock"
+        }
+        precondition(self.path.utf8.count < 104)
+        listenFD = try UnixSocket.listen(path: self.path)
         let fd = listenFD
         Thread.detachNewThread { [self] in
             defer { done.signal() }
@@ -39,7 +46,7 @@ private final class FakeServer {
     func finish() {
         _ = done.wait(timeout: .now() + 3)
         UnixSocket.close(listenFD)
-        try? FileManager.default.removeItem(atPath: dir)
+        if let dir { try? FileManager.default.removeItem(atPath: dir) }
     }
 }
 
@@ -175,6 +182,49 @@ final class ApprovalClientTests: XCTestCase {
         defer { UnixSocket.close(fd) }
         let mode = try FileManager.default.attributesOfItem(atPath: dir)[.posixPermissions] as? Int
         XCTAssertEqual(mode, 0o700)
+        let client = try XCTUnwrap(UnixSocket.connect(path: path))
+        UnixSocket.close(client)
+    }
+
+    /// A second app instance (a dev build next to the installed one) must not
+    /// unlink and rebind a live socket: the first would keep listening on a file
+    /// nobody can reach any more.
+    func testListenNeverTakesOverALiveSocket() throws {
+        let path = tempPath()
+        defer { try? FileManager.default.removeItem(atPath: (path as NSString).deletingLastPathComponent) }
+        let first = try UnixSocket.listen(path: path)
+        var firstOpen = true
+        defer { if firstOpen { UnixSocket.close(first) } }
+        let inode = try FileManager.default.attributesOfItem(atPath: path)[.systemFileNumber] as? Int
+        do {
+            UnixSocket.close(try UnixSocket.listen(path: path))
+            XCTFail("a second listen took over a live socket")
+        } catch {
+            XCTAssertEqual(error as? UnixSocketError, UnixSocketError(operation: "listen", code: EADDRINUSE))
+        }
+        XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: path)[.systemFileNumber] as? Int, inode,
+                       "the live socket file is untouched")
+        // The first server is still reachable through the path: a client's connection
+        // reaches its listener (polled with a deadline, so a regression fails, not hangs).
+        let client = try XCTUnwrap(UnixSocket.connect(path: path))
+        defer { UnixSocket.close(client) }
+        var pfd = pollfd(fd: first, events: Int16(POLLIN), revents: 0)
+        XCTAssertEqual(poll(&pfd, 1, 1000), 1, "the first listener got the connection")
+        // Once the first server is gone, its file is stale and the next listen takes over.
+        UnixSocket.close(first)
+        firstOpen = false
+        let second = try UnixSocket.listen(path: path)
+        UnixSocket.close(second)
+    }
+
+    func testListenReplacesARegularFile() throws {
+        let path = tempPath()
+        let dir = (path as NSString).deletingLastPathComponent
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        XCTAssertTrue(FileManager.default.createFile(atPath: path, contents: Data("junk".utf8)))
+        let fd = try UnixSocket.listen(path: path)
+        defer { UnixSocket.close(fd) }
         let client = try XCTUnwrap(UnixSocket.connect(path: path))
         UnixSocket.close(client)
     }

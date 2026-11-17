@@ -107,6 +107,23 @@ public enum EventMapper {
         }
     }
 
+    /// After the notch answered a main-loop permission request: Claude carries on
+    /// (runs the tool, or reads the denial), but no hook says so (PostToolUse isn't
+    /// hooked), so the PermissionRequest hook writes the session back to working
+    /// itself. Only a session still in the needs-you state that request set: a
+    /// later event already moved it on, and a missing file stays missing.
+    public static func notchAnswered(allowed: Bool, payload: HookPayload, previous: Session?, now: Double) -> SessionUpdate {
+        guard payload.agentId == nil, let previous, previous.state == .needsYou else { return .ignore }
+        // Same transition as any event that resumes work: a new working stretch.
+        var session = previous
+        session.state = .working
+        session.message = nil
+        if !allowed { session.tool = nil }   // denied: that tool won't run
+        session.workingSince = now
+        session.updatedAt = now
+        return .write(session)
+    }
+
     /// Maps a subagent hook event (has agent_id) to a subagent-record update.
     public static func mapSubagent(event: String, payload: HookPayload,
                                    previous: SubagentRecord?, now: Double) -> SubagentUpdate {

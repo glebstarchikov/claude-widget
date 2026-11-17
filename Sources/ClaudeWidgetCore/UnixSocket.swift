@@ -41,7 +41,9 @@ public enum UnixSocket {
     }
 
     /// Creates the parent directory (0700, tightened if it already exists), removes a stale
-    /// file at `path`, binds and listens.
+    /// file at `path`, binds and listens. Never takes over a live socket: if a server
+    /// answers at `path` (another instance of the app), throws EADDRINUSE and leaves it
+    /// alone, so the caller can back off and try again once that server is gone.
     public static func listen(path: String) throws -> Int32 {
         guard var addr = address(path) else { throw UnixSocketError(operation: "path", code: ENAMETOOLONG) }
         let dir = (path as NSString).deletingLastPathComponent
@@ -50,7 +52,11 @@ public enum UnixSocket {
                                                     attributes: [.posixPermissions: 0o700])
             guard chmod(dir, 0o700) == 0 else { throw UnixSocketError(operation: "chmod", code: errno) }
         }
-        unlink(path)
+        switch probe(addr) {
+        case .live: throw UnixSocketError(operation: "listen", code: EADDRINUSE)
+        case .unknown(let code): throw UnixSocketError(operation: "probe", code: code)
+        case .dead: unlink(path)
+        }
         guard let fd = makeSocket() else { throw UnixSocketError(operation: "socket", code: errno) }
         let bound = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -65,6 +71,33 @@ public enum UnixSocket {
             let code = errno; Darwin.close(fd); throw UnixSocketError(operation: "listen", code: code)
         }
         return fd
+    }
+
+    private enum Probe { case live, dead, unknown(Int32) }
+
+    /// Whether a server is listening at `addr`, by connecting without blocking. Refused
+    /// (a stale file, or not a socket) or missing is dead; connected, or a full
+    /// backlog (EAGAIN), is live; anything else is unknown, so nothing is removed.
+    private static func probe(_ addr: sockaddr_un) -> Probe {
+        guard let fd = makeSocket() else { return .unknown(errno) }
+        defer { Darwin.close(fd) }
+        let flags = fcntl(fd, F_GETFL)
+        guard flags != -1, fcntl(fd, F_SETFL, flags | O_NONBLOCK) != -1 else { return .unknown(errno) }
+        var addr = addr
+        var result: Int32
+        repeat {
+            result = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+                }
+            }
+        } while result != 0 && errno == EINTR
+        if result == 0 { return .live }
+        switch errno {
+        case ECONNREFUSED, ENOENT, ENOTSOCK: return .dead
+        case EAGAIN, EINPROGRESS: return .live
+        case let code: return .unknown(code)
+        }
     }
 
     /// Blocks for the next usable connection. A connection that died before we got to it (peer

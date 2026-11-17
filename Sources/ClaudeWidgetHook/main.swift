@@ -18,14 +18,17 @@ func readTranscriptTail(_ path: String, maxBytes: UInt64 = 1_048_576) -> [String
 /// Asks the widget app to decide a permission request. Prints Claude Code's
 /// decision JSON on allow/deny; prints nothing (falls through to the normal
 /// prompt) when the app is absent, slow, or gives no explicit answer.
-func askWidgetForDecision(payload: HookPayload, ownerBundleId: String?) {
-    guard !ApprovalPolicy.hookSkips(toolName: payload.toolName ?? "") else { return }
+@discardableResult
+func askWidgetForDecision(payload: HookPayload, ownerBundleId: String?) -> ApprovalOutcome {
+    guard !ApprovalPolicy.hookSkips(toolName: payload.toolName ?? "") else { return .noDecision }
     let request = ApprovalRequest(payload: payload, ownerBundleId: ownerBundleId, id: UUID().uuidString)
-    switch ApprovalClient.run(socketPath: WidgetConstants.approvalSocket.path, request: request) {
+    let outcome = ApprovalClient.run(socketPath: WidgetConstants.approvalSocket.path, request: request)
+    switch outcome {
     case .allow: print(HookDecision.allowJSON)
     case .deny: print(HookDecision.denyJSON)
     case .noDecision: break
     }
+    return outcome
 }
 
 let arguments = CommandLine.arguments
@@ -62,7 +65,14 @@ if let agentId = payload.agentId {
     }
     try? store.apply(update)
     if event == "PermissionRequest" {
-        askWidgetForDecision(payload: payload, ownerBundleId: ProcessInfo.processInfo.environment["__CFBundleIdentifier"])
+        let outcome = askWidgetForDecision(payload: payload, ownerBundleId: ProcessInfo.processInfo.environment["__CFBundleIdentifier"])
+        // Answered from the notch: Claude carries on, so the session stops needing you
+        // now (written before exiting, so before Claude's next hook for this session).
+        if outcome != .noDecision {
+            try? store.apply(EventMapper.notchAnswered(allowed: outcome == .allow, payload: payload,
+                                                       previous: store.read(sessionId: payload.sessionId),
+                                                       now: Date().timeIntervalSince1970))
+        }
     }
 }
 exit(0)
