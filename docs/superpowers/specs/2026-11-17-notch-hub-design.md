@@ -154,7 +154,7 @@ Hooks fire in the terminal, IDE extensions and the desktop app. **Not documented
 - Everything else (Edit, Write, NotebookEdit, unknown tools): shows file/tool + a short summary with **Deny** and **Open** (focus the session's app) — no Allow, because a diff doesn't fit the notch.
 - The pill shows Allow only when the request fits on one line; otherwise it shows **Review** (expands the hub to the row) and **Deny**.
 
-**Socket.** `~/.claude/claude-widget/run/approve.sock` (well under the 104-byte path limit). The app creates `run/` with mode 0700, removes a stale socket file on launch, binds, and unlinks on quit.
+**Socket.** `~/.claude/claude-widget/run/approve.sock` (well under the 104-byte path limit). The app creates `run/` with mode 0700, removes a stale socket file on launch (never a live one: a second instance backs off until the first is gone), binds, and unlinks on quit.
 
 **Hook flow** (`PermissionRequest` only):
 1. Write the session state file exactly as today (needs-you).
@@ -177,9 +177,9 @@ Hooks fire in the terminal, IDE extensions and the desktop app. **Not documented
 ## 9. Settings and the rest of the app
 
 - The popover is removed. A standard macOS Settings window (SwiftUI grouped `Form`) opens from the critter's right-click menu and a small gear in the Limits module. Opening it activates the app (normal for a settings window).
-- Sections: **General** (Launch at login) · **Notch** (Open on hover · Show alerts proactively · Answer permission prompts) · **Limits** (Show Claude limits) · **Phone** (existing ntfy controls, unchanged) · **Hooks** (status · Install / Update / Remove).
+- Sections: **General** (Launch at login) · **Notch** (Open on hover · Show alerts proactively · Answer permission prompts) · **Limits** (Show Claude limits) · **Phone** (existing ntfy controls, unchanged) · **Hooks** (status · Install / Remove; Install also updates an old install, R10).
 - Minimum macOS becomes **26.0**: `Package.swift` platforms and `LSMinimumSystemVersion` in `scripts/bundle.sh`.
-- README: replace "Hooks are all async, so they add zero latency" with the accurate statement (all async except PermissionRequest, which waits only while the app is running and you're not in the session's app, capped at 30 s); document the limits feed (undocumented endpoint, reads Claude Code's sign-in from the Keychain, sends it only to Anthropic, never refreshes it); macOS 26 requirement.
+- README (done): replaced "Hooks are all async, so they add zero latency" with the accurate statement (all async except PermissionRequest, which waits only while the app is running, you're not in the session's app and the alert or the hub is visible, capped at 30 s); documented the limits feed (undocumented endpoints; the widget copies Claude Code's sign-in from the Keychain into its own entry and renews that copy, §7; sends it only to Anthropic); macOS 26 requirement.
 - Unchanged: hook → state-file pipeline, subagent tracking, click-to-focus, ntfy phone alerts (they still fire on needs-you/finished), staleness GC, `simulate.sh`, DMG script.
 
 ## 10. Edge cases
@@ -271,8 +271,9 @@ Not measured: whether the app's own prompt is visible while a synchronous hook r
 
 ## 16. Deviations accepted during implementation
 
-Controller rulings (ledger R15–R20) and related accepted choices:
+Controller rulings (ledger R10, R15–R20) and related accepted choices:
 
+- **R10** — No separate Hooks "Update" button or state: Install re-merges the widget's entries, so an old install shows **Install hooks** again (§8) and Install updates it.
 - **R15** — Allow is `.borderedProminent` tinted indigo, not `.glassProminent`: in the never-key panel the glass tint doesn't render, so Allow looked identical to Deny.
 - **R16** — A pill carrying Allow / Deny / Review / Open does not expand on hover (§5 says pills expand), so buttons never move under the pointer; info-only pills still expand; Review opens the hub.
 - **R17** — A request with no owner bundle id is passed immediately, since the two mandatory pass rules can't be applied without it.
@@ -284,3 +285,14 @@ Controller rulings (ledger R15–R20) and related accepted choices:
 - **MCP keys capped at 32** printable-ASCII characters; longer keys make the request Open-only.
 - **Allow after layout** — Allow is offered only once the request text has been laid out at 8 columns or more.
 - **Limits off** — a renewal already in flight finishes saving after Show Claude limits is turned off, so a rotated sign-in is never lost.
+
+Final whole-branch review fixes:
+
+- **Allow only while the whole request is on screen** — a request laid out in more than 10 rows gets Open (Review in the pill), and a row offers Allow only while its whole frame lies inside the Agents list's visible area (the list scrolls). Review scrolls the request's bottom edge into view.
+- **Settle on appearing** — the 0.5 s Allow settle also restarts when the hub opens and when the approval pill appears.
+- **WebFetch / WebSearch** — URL and query share Bash's 400-scalar cap.
+- **Back to working after a notch answer** — after Allow or Deny for a main-loop request, the hook writes the session back to working (PostToolUse isn't hooked, so nothing else would until Claude's next event).
+- **One socket owner** — the app never unlinks a socket another instance is serving; it backs off and takes over only once that socket is dead or gone.
+- **Quit** — SIGTERM quits through the app (socket unlinked); quitting waits up to 5 s for a sign-in renewal in flight to be saved; usage and renewal requests time out (30 s per request, 60 s overall).
+- **Hook process tests (§11) exist** — `Tests/ClaudeWidgetCoreTests/HookProcessTests.swift` spawns the built hook with its home redirected by `CFFIXED_USER_HOME` and a fake app on the socket: no socket, a silent socket, ack + allow / deny / close / pass, and the session write-back.
+- **`--auto-answer`** (verification only) exists in debug builds only.

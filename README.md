@@ -43,8 +43,8 @@ additively — your existing hooks are kept).
 
 Hook latency: every hook runs in the background (`async`) except
 `PermissionRequest`. That one waits for the widget only while the widget is
-running, you're not in the session's app, and the alert is visible — at most
-30 seconds. If the widget isn't running it adds about 10 ms.
+running, you're not in the session's app, and the alert or the hub is visible —
+at most 30 seconds. If the widget isn't running it adds about 10 ms (warm).
 
 ## How it works
 
@@ -84,8 +84,10 @@ here is exactly how it handles one:
 When Claude asks permission and you're in another app, a pill drops from the
 notch with **Allow / Deny** (or **Review** / **Open** when the full request
 doesn't fit or can't be shown safely). Allow is offered only when the whole
-request is visible: file edits and non-ASCII requests get Open + Deny, and long
-commands wrap in exact columns with `↪` / `␣` markers so nothing is hidden. If
+request is visible: file edits and non-ASCII requests get Open + Deny, long
+commands wrap in exact columns with `↪` / `␣` markers so nothing is hidden, and
+a request taller than 10 rows, or partly scrolled out of the hub's list, gets
+Open instead of Allow. After you answer, the session shows as working again. If
 the session's own app is in front (or comes to the front) the widget steps
 aside and Claude asks normally. Auto mode approves most actions itself; only
 the prompts it escalates reach the notch.
