@@ -174,7 +174,9 @@ final class HubController {
         if model.expanded {
             if keepZones.contains(where: { Self.pointer(p, in: $0) }) {
                 closeTask?.cancel(); closeTask = nil
-                hoverCloseArmed = true
+                // Arm only over the hub itself: the critter is a keep zone too, and
+                // a hub opened from it must survive the trip from the critter.
+                if let hub = hubFrame, Self.pointer(p, in: hub) { hoverCloseArmed = true }
             } else if hoverCloseArmed, closeTask == nil {
                 closeTask = after(Self.closeDelay) { [weak self] in self?.closeIfAway() }
             }

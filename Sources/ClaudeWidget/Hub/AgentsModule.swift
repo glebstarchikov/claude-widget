@@ -200,12 +200,14 @@ private enum OwnerApp {
     }
 }
 
-/// Bring the app that launched a session (its owner) to the front.
+/// Bring the app that launched a session (its owner) to the front. Goes
+/// through LaunchServices even when the app is running: the hub never becomes
+/// active, and macOS may refuse `NSRunningApplication.activate()` from an
+/// inactive app, while opening the app activates the existing instance.
 @MainActor
 func activateOwnerApp(_ bundleId: String) {
-    if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first {
-        app.activate()
-    } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
-        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
-    }
+    let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first
+    guard let url = running?.bundleURL ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)
+    else { return }
+    NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
 }
