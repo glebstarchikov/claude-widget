@@ -12,11 +12,14 @@ public enum ApprovalClient {
                            decisionTimeout: TimeInterval = WidgetConstants.approvalDecisionTimeout) -> ApprovalOutcome {
         guard let fd = UnixSocket.connect(path: socketPath) else { return .noDecision }
         defer { UnixSocket.close(fd) }
+        // Sending the request and waiting for the ack share one ackTimeout budget.
+        let start = DispatchTime.now().uptimeNanoseconds
         guard UnixSocket.peerUID(fd) == getuid(),
-              UnixSocket.write(fd, ApprovalWire.encode(request)) else { return .noDecision }
+              UnixSocket.write(fd, ApprovalWire.encode(request), timeout: ackTimeout) else { return .noDecision }
+        let spent = TimeInterval(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000_000
 
         let reader = LineReader(fd: fd)
-        guard let ackLine = reader.next(timeout: ackTimeout),
+        guard let ackLine = reader.next(timeout: max(0, ackTimeout - spent)),
               ApprovalWire.decodeReply(ackLine) == .ack,
               let decisionLine = reader.next(timeout: decisionTimeout) else { return .noDecision }
         switch ApprovalWire.decodeReply(decisionLine) {

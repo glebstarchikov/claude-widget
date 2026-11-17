@@ -13,7 +13,7 @@ private final class FakeServer {
     private var _received: ApprovalRequest?
     var received: ApprovalRequest? { lock.lock(); defer { lock.unlock() }; return _received }
 
-    init(steps: [Step]) throws {
+    init(steps: [Step], readsRequest: Bool = true) throws {
         dir = "/tmp/cw-\(UUID().uuidString.prefix(8))"
         path = dir + "/a.sock"
         precondition(path.utf8.count < 104)
@@ -23,7 +23,7 @@ private final class FakeServer {
             defer { done.signal() }
             guard let conn = UnixSocket.accept(fd) else { return }
             defer { UnixSocket.close(conn) }
-            if let line = LineReader(fd: conn).next(timeout: 2) {
+            if readsRequest, let line = LineReader(fd: conn).next(timeout: 2) {
                 lock.lock(); _received = ApprovalWire.decodeRequest(line); lock.unlock()
             }
             for step in steps {
@@ -56,11 +56,11 @@ final class ApprovalClientTests: XCTestCase {
         return p
     }
 
-    private func run(_ steps: [FakeServer.Step], ack: TimeInterval = 0.5, decision: TimeInterval = 1,
+    private func run(_ steps: [FakeServer.Step], request: ApprovalRequest? = nil, readsRequest: Bool = true, ack: TimeInterval = 0.5, decision: TimeInterval = 1,
                      file: StaticString = #filePath, line: UInt = #line) throws -> (ApprovalOutcome, TimeInterval, ApprovalRequest?) {
-        let server = try FakeServer(steps: steps)
+        let server = try FakeServer(steps: steps, readsRequest: readsRequest)
         let t0 = Date()
-        let outcome = ApprovalClient.run(socketPath: server.path, request: req(), ackTimeout: ack, decisionTimeout: decision)
+        let outcome = ApprovalClient.run(socketPath: server.path, request: request ?? req(), ackTimeout: ack, decisionTimeout: decision)
         let elapsed = Date().timeIntervalSince(t0)
         server.finish()
         return (outcome, elapsed, server.received)
@@ -86,10 +86,33 @@ final class ApprovalClientTests: XCTestCase {
     }
 
     func testServerNeverAcksTimesOut() throws {
-        let (outcome, elapsed, _) = try run([.sleep(0.4)], ack: 0.2)
+        let (outcome, elapsed, _) = try run([.sleep(1.0)], ack: 0.2)
         XCTAssertEqual(outcome, .noDecision)
         XCTAssertGreaterThanOrEqual(elapsed, 0.2)
         XCTAssertLessThan(elapsed, 0.6)
+    }
+
+    func testNonReadingServerWithLargeRequestHonoursAckDeadline() throws {
+        var big = req()
+        big.toolInput = String(repeating: "a", count: 20_000)
+        let (outcome, elapsed, _) = try run([.sleep(1.0)], request: big, readsRequest: false, ack: 0.3)
+        XCTAssertEqual(outcome, .noDecision)
+        XCTAssertGreaterThanOrEqual(elapsed, 0.3)
+        XCTAssertLessThan(elapsed, 0.6)
+    }
+
+    func testAcceptSkipsConnectionThatDiedBeforeAccept() throws {
+        let path = tempPath()
+        let listener = try UnixSocket.listen(path: path)
+        defer { UnixSocket.close(listener); try? FileManager.default.removeItem(atPath: (path as NSString).deletingLastPathComponent) }
+        let dead = try XCTUnwrap(UnixSocket.connect(path: path))
+        XCTAssertTrue(UnixSocket.write(dead, Data("x\n".utf8)))
+        UnixSocket.close(dead)
+        let live = try XCTUnwrap(UnixSocket.connect(path: path))
+        defer { UnixSocket.close(live) }
+        let accepted = UnixSocket.accept(listener)
+        XCTAssertNotNil(accepted)
+        accepted.map(UnixSocket.close)
     }
 
     func testPassReturnsNoDecision() throws {
@@ -124,7 +147,7 @@ final class ApprovalClientTests: XCTestCase {
     }
 
     func testAckThenSilenceHitsDecisionTimeout() throws {
-        let (outcome, elapsed, _) = try run([ack, .sleep(0.5)], decision: 0.3)
+        let (outcome, elapsed, _) = try run([ack, .sleep(1.0)], ack: 0.1, decision: 0.3)
         XCTAssertEqual(outcome, .noDecision)
         XCTAssertGreaterThanOrEqual(elapsed, 0.3)
         XCTAssertLessThan(elapsed, 0.7)

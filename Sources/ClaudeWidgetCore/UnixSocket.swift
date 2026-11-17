@@ -67,16 +67,19 @@ public enum UnixSocket {
         return fd
     }
 
-    /// Blocks for the next connection. Retries EINTR; nil on any other failure (e.g. listener closed).
+    /// Blocks for the next usable connection. A connection that died before we got to it (peer
+    /// already closed, so sockopts fail) or was aborted (ECONNABORTED) is dropped and the wait
+    /// continues; EINTR is retried. Returns nil only when the listener itself is unusable
+    /// (closed, invalid, out of descriptors).
     public static func accept(_ fd: Int32) -> Int32? {
         while true {
             let conn = Darwin.accept(fd, nil, nil)
             if conn >= 0 {
                 if configure(conn) { return conn }
                 Darwin.close(conn)
-                return nil
+                continue
             }
-            if errno != EINTR { return nil }
+            if errno != EINTR && errno != ECONNABORTED { return nil }
         }
     }
 
@@ -110,6 +113,32 @@ public enum UnixSocket {
             while offset < buffer.count {
                 let n = Darwin.write(fd, buffer.baseAddress! + offset, buffer.count - offset)
                 if n > 0 { offset += n } else if n < 0 && errno == EINTR { continue } else { return false }
+            }
+            return true
+        }
+    }
+
+    /// Like `write(_:_:)` but gives up when `timeout` elapses (poll for POLLOUT, non-blocking
+    /// write), so a peer that never reads cannot stall the caller past its deadline.
+    public static func write(_ fd: Int32, _ data: Data, timeout: TimeInterval) -> Bool {
+        let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(0, timeout) * 1_000_000_000)
+        // MSG_DONTWAIT is not honoured for AF_UNIX on Darwin (measured), so use O_NONBLOCK for the duration.
+        let flags = fcntl(fd, F_GETFL)
+        guard flags != -1, fcntl(fd, F_SETFL, flags | O_NONBLOCK) != -1 else { return false }
+        defer { _ = fcntl(fd, F_SETFL, flags) }
+        return data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) -> Bool in
+            var offset = 0
+            while offset < buffer.count {
+                let now = DispatchTime.now().uptimeNanoseconds
+                guard now < deadline else { return false }
+                var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+                let ready = poll(&pfd, 1, Int32(min((deadline - now + 999_999) / 1_000_000, UInt64(Int32.max))))
+                if ready < 0 { if errno == EINTR { continue }; return false }
+                if ready == 0 { continue }
+                let n = Darwin.write(fd, buffer.baseAddress! + offset, buffer.count - offset)
+                if n > 0 { offset += n }
+                else if n < 0 && (errno == EINTR || errno == EAGAIN) { continue }
+                else { return false }
             }
             return true
         }
