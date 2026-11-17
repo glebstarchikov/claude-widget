@@ -119,7 +119,7 @@ public enum ApprovalPolicy {
         else { return openOnly }
 
         func single(_ text: String?, limit: Int = .max) -> ApprovalPresentation {
-            guard let text, !text.isEmpty, text.count <= limit, isPlainText(text) else { return openOnly }
+            guard let text, !text.isEmpty, text.unicodeScalars.count <= limit, isPlainText(text) else { return openOnly }
             let oneLine = !text.contains(where: \.isNewline) && !text.contains("\t") && text.count <= oneLineChars
             return .allowable(summary: text, fitsOneLine: oneLine)
         }
@@ -143,6 +143,7 @@ public enum ApprovalPolicy {
         default: break
         }
         if name.hasPrefix("mcp__") {
+            guard isPlainText(name), !name.contains(where: \.isNewline) else { return openOnly }
             var lines: [String] = []
             for key in input.keys.sorted() {
                 let value: String
@@ -150,11 +151,11 @@ public enum ApprovalPolicy {
                     let data = (try? JSONSerialization.data(withJSONObject: input[key] ?? NSNull(), options: [.sortedKeys, .fragmentsAllowed])) ?? Data()
                     value = String(data: data, encoding: .utf8) ?? ""
                 }
-                guard value.count <= maxMCPValueChars, isPlainText(key), isPlainText(value) else { return openOnly }
+                guard value.unicodeScalars.count <= maxMCPValueChars, isPlainText(key), isPlainText(value),
+                      !key.contains(where: \.isNewline), !value.contains(where: \.isNewline) else { return openOnly }
                 lines.append("\(key): \(value)")
             }
-            let visibleLines = lines.joined(separator: "\n").split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-            guard !lines.isEmpty ? visibleLines.count <= maxMCPArgLines : true else { return openOnly }
+            guard lines.count <= maxMCPArgLines else { return openOnly }
             return .allowable(summary: ([name] + lines).joined(separator: "\n"), fitsOneLine: lines.isEmpty)
         }
         return openOnly
@@ -165,6 +166,7 @@ public enum ApprovalPolicy {
     static func isPlainText(_ text: String) -> Bool {
         text.unicodeScalars.allSatisfy { scalar in
             if scalar == "\n" || scalar == "\t" { return true }
+            if scalar.properties.isDefaultIgnorableCodePoint { return false }
             switch scalar.properties.generalCategory {
             case .control, .format, .lineSeparator, .paragraphSeparator: return false
             default: return true

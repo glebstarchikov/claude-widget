@@ -179,9 +179,28 @@ final class ApprovalTests: XCTestCase {
         XCTAssertEqual(presentation("Bash", ["command": "a\tb"]), .allowable(summary: "a\tb", fitsOneLine: false))
     }
 
-    func testMCPNewlinesInValuesCountAsLines() {
-        assertOpenOnly(presentation("mcp__s__t", ["a": "1\n2\n3\n4\n5"]), "5-line value")
-        assertAllowable(presentation("mcp__s__t", ["a": "1\n2"]), "2-line value")
+    func testMCPNewlinesAreOpenOnly() {
+        assertOpenOnly(presentation("mcp__s__t", ["a": "1\n2\n3"]), "multi-line value")
+        assertOpenOnly(presentation("mcp__shell__exec", ["cmd": "rm -rf ~/proj\ndry_run: true"]), "forged arg line")
+        assertOpenOnly(presentation("mcp__s__t", ["k\nfake": "v"]), "newline in key")
+        let bad = ApprovalPolicy.presentation(for: request(tool: "mcp__s__t\nfake: line", input: "{}"))
+        assertOpenOnly(bad, "tool name newline")
+        assertAllowable(presentation("mcp__s__t", ["a": "1", "b": "2", "c": "3"]), "3 args")
+        assertOpenOnly(presentation("mcp__s__t", ["a": "1", "b": "2", "c": "3", "d": "4"]), "4 args")
+    }
+
+    func testInvisibleScalarsAreOpenOnly() {
+        assertOpenOnly(presentation("mcp__slack__send", ["channel": "C1", "text": "hi" + String(repeating: "\u{FE0F}", count: 300)]), "VS smuggling")
+        assertOpenOnly(presentation("Bash", ["command": "ls\u{FE0F}"]), "Bash VS")
+        assertOpenOnly(presentation("mcp__s__t", ["a": "x\u{3164}"]), "Hangul filler")
+    }
+
+    func testLimitsAreMeasuredInScalars() {
+        let flag = "e\u{301}" // 1 Character, 2 scalars
+        assertAllowable(presentation("Bash", ["command": String(repeating: flag, count: 200)]), "400 scalars")
+        assertOpenOnly(presentation("Bash", ["command": String(repeating: flag, count: 200) + "x"]), "401 scalars")
+        assertAllowable(presentation("mcp__s__t", ["a": String(repeating: flag, count: 40)]), "80 scalars")
+        assertOpenOnly(presentation("mcp__s__t", ["a": String(repeating: flag, count: 40) + "x"]), "81 scalars")
     }
 
     func testBashWithExtraKeysOrRiskyFlagsIsOpenOnly() {
