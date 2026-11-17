@@ -28,11 +28,14 @@ final class UsageMonitor {
     private let model: HubModel
     /// One session for usage and renewal. No URL cache or cookie store, so a
     /// request carrying a token never lands on disk; no redirects, so a token
-    /// only goes to the host its request names.
+    /// only goes to the host its request names. Bounded, so one stalled request
+    /// (a renewal especially) can't hold up every later poll.
     private let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.urlCache = nil
         config.httpCookieStorage = nil
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 60
         return URLSession(configuration: config, delegate: NoRedirects(), delegateQueue: nil)
     }()
 
@@ -75,6 +78,15 @@ final class UsageMonitor {
         model.limits = .off
         model.limitsFromCache = false
         model.limitsSaveFailed = false
+    }
+
+    /// A renewal is in flight. Once it's sent, only its reply holds a live refresh
+    /// token, so quitting before it's saved would lose the sign-in (AppDelegate waits).
+    var renewing: Bool { renewal != nil }
+
+    /// Returns once the renewal in flight, if any, has finished: request and verified save.
+    func renewalFinished() async {
+        _ = await renewal?.value
     }
 
     /// On hub open: poll now unless a poll started in the last 60 s. While polls

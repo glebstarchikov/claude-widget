@@ -115,7 +115,8 @@ private struct UsageRing: View {
     let window: UsageWindow
     @Environment(\.colorScheme) private var colorScheme
 
-    private var percent: Int { Int(window.percent.rounded()) }
+    /// Clamped like ResetFormat: an absurd percent from the feed must not trap converting to Int.
+    private var percent: Int { Int(min(max(window.percent, 0), 999).rounded()) }
 
     private var color: Color {
         if window.percent >= 90 { return .red }

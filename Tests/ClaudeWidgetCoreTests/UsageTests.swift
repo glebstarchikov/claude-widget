@@ -228,6 +228,21 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(f(0), "now")
     }
 
+    func testResetFormatClampsAbsurdResetTimes() throws {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertEqual(ResetFormat.resetsIn(Date(timeIntervalSince1970: 1e300), now: now), "999d 0h")
+        XCTAssertEqual(ResetFormat.resetsIn(Date(timeIntervalSinceReferenceDate: .infinity), now: now), "999d 0h")
+        XCTAssertEqual(ResetFormat.resetsIn(.distantFuture, now: now), "999d 0h")
+        XCTAssertEqual(ResetFormat.resetsIn(Date(timeIntervalSinceReferenceDate: .nan), now: now), "now")
+        XCTAssertEqual(ResetFormat.resetsIn(now.addingTimeInterval(998 * 86400 + 5 * 3600), now: now), "998d 5h",
+                       "below the clamp, unchanged")
+        // Through the parser: a huge numeric resets_at parses, then formats without trapping.
+        let usage = try UsageParser.parseClaude(Data(#"{"limits":[{"kind":"weekly","percent":5,"resets_at":1e300}]}"#.utf8),
+                                                fetchedAt: now)
+        let resetsAt = try XCTUnwrap(usage.windows.first?.resetsAt)
+        XCTAssertEqual(ResetFormat.resetsIn(resetsAt, now: now), "999d 0h")
+    }
+
     // MARK: poll policy
 
     func testPollPolicy() {

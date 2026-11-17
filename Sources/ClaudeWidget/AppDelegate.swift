@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import os
 import ClaudeWidgetCore
 
 @MainActor
@@ -16,8 +17,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var approvals: ApprovalCoordinator!
     private var approvalsToggle: AnyCancellable?
     private var proactiveToggle: AnyCancellable?
+    /// SIGTERM (`pkill`, `scripts/bundle.sh --install`) quits like the menu's Quit.
+    private var sigterm: DispatchSourceSignal?
+    /// Quit is waiting for a sign-in renewal (`applicationShouldTerminate`).
+    private var quitWaiting = false
+    /// How long quitting waits for a renewal in flight to be saved.
+    private static let renewalQuitWait: TimeInterval = 5
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Without this, SIGTERM kills the app outright: no unlinking the socket and
+        // no waiting for a renewal's save. Routed through terminate, it's a normal quit.
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { NSApp.terminate(nil) }
+        source.resume()
+        sigterm = source
+
         UserDefaults.standard.register(defaults: [
             "notchProactiveEnabled": true,
             "hubHoverEnabled": true,
@@ -89,6 +104,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         monitor.start()
 
         if CommandLine.arguments.contains("--show-hub") { hub.showExpanded() }
+    }
+
+    /// A renewal in flight finishes and saves first (at most `renewalQuitWait`):
+    /// the refresh token it sent is already spent, and only its reply is live.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let usage, usage.renewing else { return .terminateNow }
+        if quitWaiting { return .terminateLater }
+        quitWaiting = true
+        Logger.limits.notice("quit waits for the sign-in renewal")
+        Task { [weak self] in
+            await usage.renewalFinished()
+            self?.allowQuit()
+        }
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.renewalQuitWait))
+            if self?.quitWaiting == true { Logger.limits.error("quit stopped waiting for the renewal") }
+            self?.allowQuit()
+        }
+        return .terminateLater
+    }
+
+    private func allowQuit() {
+        guard quitWaiting else { return }
+        quitWaiting = false
+        NSApp.reply(toApplicationShouldTerminate: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

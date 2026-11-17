@@ -51,8 +51,19 @@ codesign --force --deep --sign - "$APP"
 echo "built: $APP"
 
 if [ "${1:-}" = "--install" ]; then
-  pkill -f "Claude Widget.app/Contents/MacOS" 2>/dev/null || true
-  sleep 0.4
+  # SIGTERM quits the app the normal way: it unlinks its socket and, if a
+  # sign-in renewal is in flight, waits (up to ~5 s) for it to be saved. Wait for
+  # it to exit, so the new copy never starts beside the old one.
+  APP_PROC="Claude Widget.app/Contents/MacOS"
+  pkill -f "$APP_PROC" 2>/dev/null || true
+  for _ in $(seq 1 100); do
+    pgrep -f "$APP_PROC" >/dev/null || break
+    sleep 0.1
+  done
+  if pgrep -f "$APP_PROC" >/dev/null; then
+    echo "the running Claude Widget didn't quit within 10 s; not installing" >&2
+    exit 1
+  fi
   rm -rf "/Applications/Claude Widget.app"
   cp -R "$APP" /Applications/
   open "/Applications/Claude Widget.app"

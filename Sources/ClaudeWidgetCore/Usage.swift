@@ -108,10 +108,14 @@ public enum UsageRequest {
 }
 
 public enum ResetFormat {
+    /// Longer waits read as this many days: an absurd `resets_at` from the feed
+    /// (1e300, say) must not trap converting to Int.
+    static let maxDays = 999
+
     public static func resetsIn(_ date: Date, now: Date) -> String {
         let seconds = date.timeIntervalSince(now)
-        guard seconds > 0 else { return "now" }
-        let minutes = Int(seconds / 60)
+        guard seconds > 0 else { return "now" }   // also NaN
+        let minutes = Int(min(seconds, Double(maxDays) * 86400) / 60)
         if minutes < 1 { return "<1m" }
         let days = minutes / 1440, hours = (minutes % 1440) / 60, mins = minutes % 60
         if days > 0 { return "\(days)d \(hours)h" }
