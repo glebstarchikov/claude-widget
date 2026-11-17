@@ -1,7 +1,7 @@
 # Notch Hub — design (project 1 of 4)
 
 Date: 2026-11-17
-Status: draft for Gleb's review
+Status: implemented on `feat/notch-hub` (2026-11-17); end-to-end checks pending
 Supersedes the popover and notch-peek parts of `2026-07-10-claude-widget-design.md`. The hook → state-file pipeline, critter, session model and phone alerts from that spec stay as they are unless this document says otherwise.
 
 Tags used below: **[Gleb]** = decided by Gleb in the brainstorming session. **[proposed]** = Claude's call, not yet objected to; change it if it's wrong. Everything untagged is a consequence of the tagged decisions or is left to the builder (see §13).
@@ -266,3 +266,21 @@ Incident during the renewal test: the renewed sign-in was not saved (sandbox + a
 | d3 | auto | — | **hook did not fire**: auto mode approved the command itself, no prompt was raised |
 
 Not measured: whether the app's own prompt is visible while a synchronous hook runs, and what happens to a hook decision that arrives after the user already answered in the app. The §8 rules make that race unreachable through the widget — the app passes immediately when the session's owning app is frontmost, and passes the moment the owning app becomes frontmost — so those two rules are **mandatory**. In auto mode the widget only sees the prompts auto mode escalates to the user.
+
+---
+
+## 16. Deviations accepted during implementation
+
+Controller rulings (ledger R15–R20) and related accepted choices:
+
+- **R15** — Allow is `.borderedProminent` tinted indigo, not `.glassProminent`: in the never-key panel the glass tint doesn't render, so Allow looked identical to Deny.
+- **R16** — A pill carrying Allow / Deny / Review / Open does not expand on hover (§5 says pills expand), so buttons never move under the pointer; info-only pills still expand; Review opens the hub.
+- **R17** — A request with no owner bundle id is passed immediately, since the two mandatory pass rules can't be applied without it.
+- **R18** — `ApprovalServer`'s handler returns its on-close callback (the planned signature couldn't report a close).
+- **R19** — When no pill will be shown (Show alerts proactively off) and the hub is not open, the request is passed immediately instead of held up to 30 s. Lifecycle cases (hub closes with pending requests, proactive turned off while closed, a request whose session has no row) also pass.
+- **R20** — The approval pill is 540 pt wide (§5 says about 380) so a 60-character command fits on one line.
+- **Hard-wrap renderer** — long commands wrap in exact columns with `↪` / `␣` markers so real newlines and spaces are never hidden; Allow is offered only for ASCII-only requests (non-ASCII gets Open + Deny).
+- **0.5 s settle** — Allow is ignored for 0.5 s after the pending queue changes and after the owning row moves; Deny stays immediate.
+- **MCP keys capped at 32** printable-ASCII characters; longer keys make the request Open-only.
+- **Allow after layout** — Allow is offered only once the request text has been laid out at 8 columns or more.
+- **Limits off** — a renewal already in flight finishes saving after Show Claude limits is turned off, so a rotated sign-in is never lost.
