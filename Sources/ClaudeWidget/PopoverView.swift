@@ -28,79 +28,8 @@ struct PopoverView: View {
                     SessionRow(session: session, dark: colorScheme == .dark)
                 }
             }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 10) {
-                Toggle("Launch at login", isOn: $model.launchAtLogin)
-                Toggle("Notch peek", isOn: $model.notchAlerts)
-                if model.notchAlerts {
-                    Toggle("Show proactively", isOn: $model.notchProactive)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 20)
-                }
-                Toggle("Notify my phone", isOn: $model.pushEnabled)
-                if model.pushEnabled {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(spacing: 6) {
-                            Text(model.pushTopic)
-                                .font(Font(Theme.monoFont(11)))
-                                .textSelection(.enabled)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(model.pushTopic, forType: .string)
-                            } label: { Image(systemName: "doc.on.doc") }
-                                .buttonStyle(.borderless)
-                                .help("Copy topic")
-                            Spacer()
-                            Button("Send test") { model.sendTestPush() }
-                                .font(.system(size: 11))
-                        }
-                        Text("Install the ntfy app → tap +, paste this topic")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.leading, 20)
-                }
-            }
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-            .font(.system(size: 13))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-
-            Divider()
-
-            HStack {
-                hooksControl
-                Spacer()
-                Button("Quit") { NSApp.terminate(nil) }
-                    .font(.system(size: 13))
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
         }
         .frame(width: 320)
-        .onAppear { model.refreshHooksStatus() }
-    }
-
-    @ViewBuilder private var hooksControl: some View {
-        if model.hooksInstalled {
-            HStack(spacing: 6) {
-                Text("Hooks installed")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                Button("Remove") { model.removeHooks() }
-                    .font(.system(size: 12))
-                    .buttonStyle(.link)
-            }
-        } else {
-            Button("Install hooks") { model.installHooks() }
-                .font(.system(size: 13))
-        }
     }
 }
 

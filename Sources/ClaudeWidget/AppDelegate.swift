@@ -11,11 +11,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notch: NotchPanelController!
     private var hover: NotchHoverController!
     private let pushNotifier = PushNotifier()
+    private var settingsWindow: SettingsWindowController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: [
             "notchAlertsEnabled": true,
             "notchProactiveEnabled": true,
+            "hubHoverEnabled": true,
+            "answerFromNotchEnabled": true,
             "pushEnabled": false,
         ])
 
@@ -29,6 +32,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentViewController = hosting
 
         statusController.onClick = { [weak self] in self?.togglePopover() }
+        statusController.onRightClick = { [weak self] in self?.showStatusMenu() }
+        settingsWindow = SettingsWindowController(model: model)
+        if CommandLine.arguments.contains("--show-settings") { settingsWindow.show() }
 
         notch = NotchPanelController()
         notch.onTap = { [weak self] in self?.openPopover() }
@@ -83,6 +89,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return ("Sleeping", "no active sessions", .asleep)
         }
     }
+
+    private func showStatusMenu() {
+        popover.performClose(nil)
+        let menu = NSMenu()
+        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        statusController.showMenu(menu)
+    }
+
+    @objc private func openSettings() { settingsWindow.show() }
 
     private func togglePopover() {
         if popover.isShown {

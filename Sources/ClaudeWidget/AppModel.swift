@@ -8,8 +8,14 @@ final class AppModel: ObservableObject {
     @Published var sessions: [Session] = []
     @Published var hooksInstalled = false
 
-    @Published var notchAlerts: Bool {
-        didSet { UserDefaults.standard.set(notchAlerts, forKey: "notchAlertsEnabled") }
+    /// Hover the notch to open the hub. Persisted only for now.
+    @Published var hubHoverEnabled: Bool {
+        didSet { UserDefaults.standard.set(hubHoverEnabled, forKey: "hubHoverEnabled") }
+    }
+
+    /// Answer permission prompts from the notch. Persisted only for now.
+    @Published var answerFromNotch: Bool {
+        didSet { UserDefaults.standard.set(answerFromNotch, forKey: "answerFromNotchEnabled") }
     }
 
     /// When the notch is on, whether it also pops up on its own for needs-you /
@@ -56,7 +62,8 @@ final class AppModel: ObservableObject {
     func sendTestPush() { notifier.sendTest() }
 
     init() {
-        notchAlerts = UserDefaults.standard.bool(forKey: "notchAlertsEnabled")
+        hubHoverEnabled = UserDefaults.standard.bool(forKey: "hubHoverEnabled")
+        answerFromNotch = UserDefaults.standard.bool(forKey: "answerFromNotchEnabled")
         notchProactive = UserDefaults.standard.bool(forKey: "notchProactiveEnabled")
         pushEnabled = UserDefaults.standard.bool(forKey: "pushEnabled")
         pushTopic = UserDefaults.standard.string(forKey: "pushTopic") ?? ""
