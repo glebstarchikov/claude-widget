@@ -154,6 +154,18 @@ final class ApprovalTests: XCTestCase {
         XCTAssertEqual(p, .allowable(summary: "swift", fitsOneLine: true))
     }
 
+    func testWebFetchAndWebSearchShareTheBashLengthCap() {
+        let url400 = "https://x.dev/" + String(repeating: "a", count: 400 - 14)
+        XCTAssertEqual(url400.unicodeScalars.count, 400)
+        assertAllowable(presentation("WebFetch", ["url": url400]), "400-scalar URL")
+        assertOpenOnly(presentation("WebFetch", ["url": url400 + "a"]), "401-scalar URL")
+        assertAllowable(presentation("WebSearch", ["query": String(repeating: "q", count: 400)]), "400-scalar query")
+        assertOpenOnly(presentation("WebSearch", ["query": String(repeating: "q", count: 401)]), "401-scalar query")
+        // The reviewer's probe: a 3000-character URL used to stay allowable.
+        assertOpenOnly(presentation("WebFetch", ["url": "https://docs.example.com/guide?" + String(repeating: "a", count: 3000),
+                                                 "prompt": "x"]), "3000-character URL")
+    }
+
     func testMCPWithFewArgsIsAllowable() {
         let p = ApprovalPolicy.presentation(for: request(tool: "mcp__srv__tool", input: #"{"a":"1","b":"two"}"#))
         guard case .allowable(let s, _) = p else { return XCTFail("expected allowable") }

@@ -39,8 +39,8 @@ final class ApprovalCoordinator {
     private var timers: [String: Task<Void, Never>] = [:]
     /// Main-loop requests whose session has shown up in `model.sessions`.
     private var sessionSeen: Set<String> = []
-    /// When (`now`) `model.pending` last gained or lost a request, or a request's
-    /// row moved.
+    /// When (`now`) `model.pending` last gained or lost a request, a request's row
+    /// moved, the hub opened or the approval pill appeared.
     private var queueChangedAt: TimeInterval = -.infinity
     /// Each request's row top edge (global points) as last reported while the hub
     /// is open. Kept by request id, so a row re-created elsewhere still counts as moved.
@@ -50,6 +50,7 @@ final class ApprovalCoordinator {
     private static var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
     private var observers: [NSObjectProtocol] = []
     /// `--auto-answer allow|deny`, for verification only (see `scheduleAutoAnswer`).
+    /// Debug builds only: a release build never answers by itself.
     private let autoAnswer: Bool?
 
     /// Called after `model.pending` changes. `dismissing` names the session of a
@@ -59,12 +60,16 @@ final class ApprovalCoordinator {
     init(model: HubModel, appModel: AppModel) {
         self.model = model
         self.appModel = appModel
+        #if DEBUG
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--auto-answer"), i + 1 < args.count, ["allow", "deny"].contains(args[i + 1]) {
             autoAnswer = args[i + 1] == "allow"
         } else {
             autoAnswer = nil
         }
+        #else
+        autoAnswer = nil
+        #endif
     }
 
     func start() {
@@ -119,6 +124,12 @@ final class ApprovalCoordinator {
         rowTops.removeAll()   // rows appearing when the hub reopens aren't moves
         guard !appModel.notchProactive else { return }
         endAll(.noPill)
+    }
+
+    /// The hub opened, or the approval pill appeared: either can land Allow under a
+    /// pointer already on its way to click something else there. Allow settles.
+    func settle() {
+        queueChangedAt = Self.now
     }
 
     /// A request's row reported its top edge. If it moved (not merely appeared),
@@ -193,7 +204,7 @@ final class ApprovalCoordinator {
         }
         model.pending.append(approval)
         queueChangedAt = Self.now
-        Logger.approval.notice("\(request.toolName, privacy: .public) held for an answer")
+        Logger.approval.notice("\(request.toolName, privacy: .public) \(request.id, privacy: .public) held for an answer")
         onChange?(nil)
         scheduleAutoAnswer(approval)
         return { [weak self] in self?.end(approval.id, .closed) }
@@ -213,7 +224,7 @@ final class ApprovalCoordinator {
         timers.removeValue(forKey: id)?.cancel()
         sessionSeen.remove(id)
         rowTops[id] = nil
-        let sessionId = model.pending.first { $0.id == id }?.request.sessionId
+        let request = model.pending.first { $0.id == id }?.request
         model.pending.removeAll { $0.id == id }
         queueChangedAt = Self.now
         switch ending {
@@ -221,7 +232,10 @@ final class ApprovalCoordinator {
         case .closed: break
         case .ownerActive, .timedOut, .sessionMovedOn, .settingOff, .noPill: reply(.pass)
         }
-        Logger.approval.notice("request \(ending.label, privacy: .public)")
+        // An audit line: which request ended how. Tool name and id only, never its input.
+        let tool = request?.toolName ?? "request"
+        Logger.approval.notice("\(tool, privacy: .public) \(id, privacy: .public) \(ending.label, privacy: .public)")
+        let sessionId = request?.sessionId
         switch ending {
         case .answered, .ownerActive: onChange?(sessionId)
         default: onChange?(nil)
@@ -232,11 +246,11 @@ final class ApprovalCoordinator {
         for id in model.pending.map(\.id) { end(id, ending) }
     }
 
-    /// Verification only. With `--auto-answer allow|deny` on the command line, a
-    /// request from `scripts/simulate.sh` (session id "sim-…") is answered after
-    /// 3 s through the same path as the buttons, and Allow only where the pill
-    /// offers it. Requests from real Claude sessions are never auto-answered,
-    /// and without the flag this does nothing.
+    /// Verification only. With `--auto-answer allow|deny` on the command line (debug
+    /// builds only), a request from `scripts/simulate.sh` (session id "sim-…") is
+    /// answered after 3 s through the same path as the buttons, and Allow only where
+    /// the pill offers it. Requests from real Claude sessions are never
+    /// auto-answered, and without the flag this does nothing.
     private func scheduleAutoAnswer(_ approval: PendingApproval) {
         guard let allow = autoAnswer, approval.request.sessionId.hasPrefix("sim-") else { return }
         if allow, ApprovalPolicy.action(for: approval.presentation, on: .pill) != .allow {

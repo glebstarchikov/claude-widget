@@ -11,12 +11,28 @@ import Foundation
 public enum ApprovalLayout {
     /// The narrowest column count a view may offer Allow next to.
     public static let minColumnsForAllow = 8
+    /// The most rows a request may take and still be offered Allow. Characters are
+    /// capped, lines aren't: `"npm test" + 30 × "\n" + "curl … | sh"` is 70
+    /// characters but 31 rows, taller than the list shows at once.
+    public static let maxRowsForAllow = 10
 
-    /// Whether text laid out in `columns` (nil: not measured yet) is legible enough
-    /// to offer Allow beside it. A view that couldn't lay its text out never offers Allow.
-    public static func canOfferAllow(columns: Int?) -> Bool {
-        guard let columns else { return false }
-        return columns >= minColumnsForAllow
+    /// Whether text laid out in `columns` and `rows` (nil: not measured yet) is
+    /// legible and short enough to offer Allow beside it. A view that couldn't lay
+    /// its text out never offers Allow.
+    public static func canOfferAllow(columns: Int?, rows: Int?) -> Bool {
+        guard let columns, let rows else { return false }
+        return columns >= minColumnsForAllow && rows <= maxRowsForAllow
+    }
+
+    /// Rounding slack when checking that a request lies inside the visible list.
+    static let visibilityTolerance = 0.5
+
+    /// Whether a request spanning `minY...maxY` lies wholly inside a viewport whose
+    /// top is 0 and bottom is `viewportHeight` (points, nil: not measured yet).
+    /// Allow is offered only beside a request whose every row is on screen.
+    public static func fullyVisible(minY: Double, maxY: Double, viewportHeight: Double?) -> Bool {
+        guard let viewportHeight, viewportHeight > 0, maxY >= minY else { return false }
+        return minY >= -visibilityTolerance && maxY <= viewportHeight + visibilityTolerance
     }
 
     /// Smaller shifts of a request's row are layout jitter, not movement.

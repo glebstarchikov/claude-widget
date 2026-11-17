@@ -44,7 +44,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         usage = UsageMonitor(model: hubModel)
-        hub.onOpen = { [weak self] in self?.usage.refreshIfStale() }
+        hub.onOpen = { [weak self] in
+            self?.usage.refreshIfStale()
+            self?.approvals.settle()   // the hub may open under a click aimed elsewhere
+        }
         // Fires now with the saved setting, then on every change.
         limitsToggle = model.$limitsEnabled.sink { [weak self] enabled in
             if enabled { self?.usage.start() } else { self?.usage.stop() }
@@ -52,8 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         approvals = ApprovalCoordinator(model: hubModel, appModel: model)
         hubModel.answerApproval = { [weak self] id, allow in self?.approvals.answer(id: id, allow: allow) }
-        hubModel.reviewApproval = { [weak self] sessionId in self?.hub.review(sessionId: sessionId) }
+        hubModel.reviewApproval = { [weak self] id in self?.hub.review(approvalId: id) }
         hubModel.approvalRowTop = { [weak self] id, top in self?.approvals.rowPositioned(id: id, top: top) }
+        hubModel.approvalPillShown = { [weak self] in self?.approvals.settle() }
         approvals.onChange = { [weak self] dismissing in self?.hub.approvalsChanged(dismissing: dismissing) }
         approvalsToggle = model.$answerFromNotch.sink { [weak self] enabled in
             self?.approvals.settingChanged(enabled: enabled)

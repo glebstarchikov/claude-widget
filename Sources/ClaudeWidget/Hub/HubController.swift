@@ -181,10 +181,10 @@ final class HubController {
         updateMouseGate()
     }
 
-    /// The pill's Review button: opens the hub where the pill is, at the request's row.
-    func review(sessionId: String) {
+    /// The pill's Review button: opens the hub where the pill is, scrolled to the request.
+    func review(approvalId: String) {
         guard let place = placement ?? notch.map(notchPlacement) ?? pointerPlacement() else { return }
-        model.revealSessionId = sessionId
+        model.revealApprovalId = approvalId
         expand(at: place, byHover: false)
     }
 
@@ -195,7 +195,7 @@ final class HubController {
         closeTask?.cancel(); closeTask = nil
         pressInHub = false
         model.expanded = false
-        model.revealSessionId = nil
+        model.revealApprovalId = nil
         updateMouseGate()
         onClose?()
     }

@@ -19,10 +19,12 @@ extension PendingApproval {
 struct ApprovalButtons: View {
     let approval: PendingApproval
     let inPill: Bool
-    /// The request's text is laid out legibly (`ApprovalLayout.canOfferAllow`).
+    /// The request's text is laid out legibly and short enough
+    /// (`ApprovalLayout.canOfferAllow`), and in a row, wholly on screen.
     let laidOut: Bool
     let answer: (_ id: String, _ allow: Bool) -> Void
-    var review: (_ sessionId: String) -> Void = { _ in }
+    /// The pill's Review: opens the hub at this request (by id).
+    var review: (_ id: String) -> Void = { _ in }
     @Environment(\.colorScheme) private var colorScheme
 
     private var indigo: Color {
@@ -47,7 +49,7 @@ struct ApprovalButtons: View {
                     .buttonStyle(.borderedProminent)
                     .tint(indigo)
             case .review:
-                Button("Review") { review(approval.request.sessionId) }
+                Button("Review") { review(approval.id) }
                     .buttonStyle(.glass)
             case .open:
                 Button("Open") {
@@ -117,13 +119,27 @@ private struct KeyText: View {
     }
 }
 
-/// The fewest columns any `ColumnText` in a request was laid out in; negative
-/// until measured, nil if there's none.
-struct LaidOutColumnsKey: PreferenceKey {
-    static let defaultValue: Int? = nil
-    static func reduce(value: inout Int?, nextValue: () -> Int?) {
+/// How a request's `ColumnText`s were laid out: the fewest columns any of them got
+/// (≤ 0 until measured) and all their rows added up.
+struct LaidOutText: Equatable {
+    var columns: Int
+    var rows: Int
+}
+
+/// A request's `LaidOutText`; nil if it has no `ColumnText`.
+struct LaidOutTextKey: PreferenceKey {
+    static let defaultValue: LaidOutText? = nil
+    static func reduce(value: inout LaidOutText?, nextValue: () -> LaidOutText?) {
         guard let next = nextValue() else { return }
-        value = min(value ?? next, next)
+        guard let current = value else { value = next; return }
+        value = LaidOutText(columns: min(current.columns, next.columns), rows: current.rows + next.rows)
+    }
+}
+
+extension ApprovalLayout {
+    /// `canOfferAllow` for what a request's views reported (`LaidOutTextKey`).
+    static func canOfferAllow(_ laidOut: LaidOutText?) -> Bool {
+        canOfferAllow(columns: laidOut?.columns, rows: laidOut?.rows)
     }
 }
 
@@ -144,17 +160,15 @@ struct ColumnText: View {
     private var columns: Int { Int(((width - Self.gutter - 1) / Self.advance).rounded(.down)) }
 
     var body: some View {
+        let pieces = columns > 0 ? ApprovalLayout.pieces(text, columns: columns) : []
         VStack(alignment: .leading, spacing: 0) {
-            if columns > 0 {
-                let pieces = ApprovalLayout.pieces(text, columns: columns)
-                ForEach(pieces.indices, id: \.self) { i in row(pieces[i]) }
-            }
+            ForEach(pieces.indices, id: \.self) { i in row(pieces[i]) }
         }
         .font(Font(Self.font as CTFont))
         // minWidth 0: never sized by its own content, so the measured width converges in one pass.
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-        .preference(key: LaidOutColumnsKey.self, value: columns)
+        .preference(key: LaidOutTextKey.self, value: .init(columns: columns, rows: pieces.count))
     }
 
     private func row(_ piece: ApprovalLayout.Piece) -> some View {
@@ -204,7 +218,20 @@ private struct MCPCall {
     }
 }
 
+/// The Agents list's visible area. Its height (environment) and its coordinate
+/// space (named) let a request check that it's wholly on screen before offering
+/// Allow: the list scrolls, and a request's tail can sit below its bottom edge.
+enum ListViewport {
+    static let space = "claude-widget.agents-list"
+}
+
+extension EnvironmentValues {
+    /// Height of the list viewport a request is drawn in; nil (no Allow) until measured.
+    @Entry var listViewportHeight: CGFloat? = nil
+}
+
 /// A pending request inline in its session's row: the whole request and its buttons.
+/// Allow only while every row of it is laid out and inside the list's visible area.
 struct PendingRequestView: View {
     let approval: PendingApproval
     /// The subagent that asked, if one did.
@@ -212,12 +239,21 @@ struct PendingRequestView: View {
     let answer: (_ id: String, _ allow: Bool) -> Void
     /// Reports this row's top edge, so a row that moves under the pointer resets Allow's settle time.
     let rowTop: (_ id: String, _ top: Double) -> Void
-    /// From the summary's `ColumnText`s (`LaidOutColumnsKey`).
-    @State private var columns: Int?
+    /// From the summary's `ColumnText`s (`LaidOutTextKey`).
+    @State private var laidOut: LaidOutText?
+    /// This request's frame in the list viewport (`ListViewport.space`).
+    @State private var frameInList: CGRect?
+    @Environment(\.listViewportHeight) private var viewportHeight
 
     private var label: String? {
         let parts = [agentType, approval.toolLabel].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private var wholeInView: Bool {
+        guard let frameInList else { return false }
+        return ApprovalLayout.fullyVisible(minY: frameInList.minY, maxY: frameInList.maxY,
+                                           viewportHeight: viewportHeight.map(Double.init))
     }
 
     var body: some View {
@@ -232,11 +268,13 @@ struct PendingRequestView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             ApprovalButtons(approval: approval, inPill: false,
-                            laidOut: ApprovalLayout.canOfferAllow(columns: columns), answer: answer)
+                            laidOut: ApprovalLayout.canOfferAllow(laidOut) && wholeInView, answer: answer)
         }
-        .onPreferenceChange(LaidOutColumnsKey.self) { columns = $0 }
+        .onPreferenceChange(LaidOutTextKey.self) { laidOut = $0 }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ListViewport.space)) } action: { frameInList = $0 }
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { top in
             rowTop(approval.id, Double(top))
         }
+        .id(approval.id)   // the pill's Review scrolls to it
     }
 }

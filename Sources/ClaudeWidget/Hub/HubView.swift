@@ -68,7 +68,7 @@ struct HubView: View {
                     }
                     AgentsModule(sessions: model.sessions, pending: model.pending,
                                  answer: model.answerApproval, rowTop: model.approvalRowTop,
-                                 reveal: model.revealSessionId,
+                                 reveal: model.revealApprovalId,
                                  scrollOffset: $scrollOffset)
                         .padding(HubLayout.modulePadding)
                         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: HubLayout.cornerRadius,
@@ -82,6 +82,9 @@ struct HubView: View {
                                  answer: model.answerApproval, review: model.reviewApproval)
                     // A new request gets fresh buttons: a press held across the swap is dropped.
                     .id(first.id)
+                    // Appearing (a new request, or the hub closing back to it) can put
+                    // Allow under a pointer already moving to click: Allow settles.
+                    .onAppear { model.approvalPillShown() }
                     .glassEffect(.regular, in: Capsule())
                     .onGeometryChange(for: CGSize.self) { $0.size } action: { onPillSizeChange($0) }
                     .transition(transition)

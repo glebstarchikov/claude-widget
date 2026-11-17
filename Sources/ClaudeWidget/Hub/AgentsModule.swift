@@ -10,9 +10,12 @@ struct AgentsModule: View {
     let pending: [PendingApproval]
     let answer: (_ id: String, _ allow: Bool) -> Void
     let rowTop: (_ id: String, _ top: Double) -> Void
-    /// A session row to open scrolled to (the pill's Review), instead of the remembered offset.
+    /// A pending request to open scrolled to, its bottom edge in view (the pill's
+    /// Review), instead of the remembered offset.
     let reveal: String?
     @Binding var scrollOffset: CGFloat
+    /// The list's visible height, for requests checking they're wholly on screen.
+    @State private var viewportHeight: CGFloat?
 
     /// Sessions with a pending request but no row yet (the monitor hasn't loaded
     /// their state file), in request order, so every held request is on screen.
@@ -43,6 +46,11 @@ struct AgentsModule: View {
                     RememberedScroll(offset: $scrollOffset, reveal: reveal) { rows }
                 }
             }
+            // This frame is the visible list either way: all the rows, or the
+            // scroll view's viewport (its content scrolls and clips inside it).
+            .coordinateSpace(.named(ListViewport.space))
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
+            .environment(\.listViewportHeight, viewportHeight)
         }
     }
 
@@ -106,26 +114,35 @@ private struct CappedHeight: Layout {
     }
 }
 
-/// A vertical scroll view that starts at `offset` (or at the `reveal` row) and
-/// keeps `offset` updated, so a re-created hub reopens where it was left.
+/// A vertical scroll view that starts at `offset` (or with the `reveal` request's
+/// bottom edge at the bottom, so all of a request that fits is in view) and keeps
+/// `offset` updated, so a re-created hub reopens where it was left.
 private struct RememberedScroll<Content: View>: View {
     @Binding var offset: CGFloat
     @State private var position: ScrollPosition
+    private let reveal: String?
     private let content: Content
 
     init(offset: Binding<CGFloat>, reveal: String?, @ViewBuilder content: () -> Content) {
         _offset = offset
-        _position = State(initialValue: reveal.map { ScrollPosition(id: $0, anchor: .top) }
-                          ?? ScrollPosition(y: offset.wrappedValue))
+        _position = State(initialValue: ScrollPosition(y: offset.wrappedValue))
+        self.reveal = reveal
         self.content = content()
     }
 
     var body: some View {
-        ScrollView { content }
-            .scrollPosition($position)
-            .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y }) { _, y in
-                offset = y
-            }
+        // The request isn't a scroll target itself (its session row is), so
+        // ScrollPosition(id:) can't find it; ScrollViewReader finds any `.id` inside.
+        ScrollViewReader { proxy in
+            ScrollView { content }
+                .scrollPosition($position)
+                .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y }) { _, y in
+                    offset = y
+                }
+                .onAppear {
+                    if let reveal { proxy.scrollTo(reveal, anchor: .bottom) }
+                }
+        }
     }
 }
 

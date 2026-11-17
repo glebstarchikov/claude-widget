@@ -39,8 +39,8 @@ final class HubModel: ObservableObject {
     @Published var pill: Pill?
     /// Live permission requests, oldest first. A needs-you pill shows the first.
     @Published var pending: [PendingApproval] = []
-    /// The session row the hub scrolls to when it opens from the pill's Review button.
-    @Published var revealSessionId: String?
+    /// The pending request the hub scrolls to when it opens from the pill's Review button.
+    @Published var revealApprovalId: String?
     @Published var limits: LimitsState = .loading
     /// `limits` shows numbers loaded from the cache, not yet refreshed this run.
     @Published var limitsFromCache = false
@@ -50,8 +50,10 @@ final class HubModel: ObservableObject {
     var openSettings: () -> Void = {}
     /// The Allow/Deny buttons (ApprovalCoordinator.answer).
     var answerApproval: (_ id: String, _ allow: Bool) -> Void = { _, _ in }
-    /// The pill's Review button: opens the hub at the request's session row.
-    var reviewApproval: (_ sessionId: String) -> Void = { _ in }
+    /// The pill's Review button: opens the hub at the request (by id).
+    var reviewApproval: (_ id: String) -> Void = { _ in }
     /// A request's row reports its top edge (ApprovalCoordinator.rowPositioned).
     var approvalRowTop: (_ id: String, _ top: Double) -> Void = { _, _ in }
+    /// The approval pill appeared under the pointer (ApprovalCoordinator.settle).
+    var approvalPillShown: () -> Void = {}
 }

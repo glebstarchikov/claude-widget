@@ -54,21 +54,26 @@ struct ApprovalPillView: View {
     /// Pending requests after this one.
     let extra: Int
     let answer: (_ id: String, _ allow: Bool) -> Void
-    let review: (_ sessionId: String) -> Void
-    /// From the summary's `ColumnText` (`LaidOutColumnsKey`).
-    @State private var columns: Int?
+    let review: (_ id: String) -> Void
+    /// From the summary's `ColumnText` (`LaidOutTextKey`).
+    @State private var laidOut: LaidOutText?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 10) {
                 GlassCritter(state: .needsYou, size: 22)
                 HStack(spacing: 5) {
+                    // Only the project name gives way: the tool beside Allow and
+                    // the count of other requests are always shown whole.
                     Text(verbatim: approval.projectName)
                         .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
                     if let tool = approval.toolLabel {
                         Text(verbatim: tool)
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
+                            .fixedSize()
+                            .layoutPriority(1)
                     }
                     if extra > 0 {
                         Text("+\(extra)")
@@ -76,12 +81,13 @@ struct ApprovalPillView: View {
                             .monospacedDigit()
                             .padding(.horizontal, 6).padding(.vertical, 1)
                             .background(.quaternary, in: Capsule())
+                            .fixedSize()
+                            .layoutPriority(1)
                     }
                 }
-                .lineLimit(1)
                 Spacer(minLength: 8)
                 ApprovalButtons(approval: approval, inPill: true,
-                                laidOut: ApprovalLayout.canOfferAllow(columns: columns),
+                                laidOut: ApprovalLayout.canOfferAllow(laidOut),
                                 answer: answer, review: review)
             }
             // The request gets the full width under the name: a one-line request
@@ -109,6 +115,6 @@ struct ApprovalPillView: View {
         .onTapGesture {
             if let owner = approval.request.ownerBundleId { activateOwnerApp(owner) }
         }
-        .onPreferenceChange(LaidOutColumnsKey.self) { columns = $0 }
+        .onPreferenceChange(LaidOutTextKey.self) { laidOut = $0 }
     }
 }

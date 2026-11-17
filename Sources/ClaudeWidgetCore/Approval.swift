@@ -154,8 +154,8 @@ public enum ApprovalPolicy {
                 }
             }
             return single(input["command"] as? String, limit: maxBashChars)
-        case "WebFetch": return single(input["url"] as? String)
-        case "WebSearch": return single(input["query"] as? String)
+        case "WebFetch": return single(input["url"] as? String, limit: maxBashChars)
+        case "WebSearch": return single(input["query"] as? String, limit: maxBashChars)
         default: break
         }
         if name.hasPrefix("mcp__") {
