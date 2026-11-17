@@ -16,6 +16,10 @@ struct SettingsView: View {
                 Toggle("Answer permission prompts", isOn: $model.answerFromNotch)
             }
 
+            Section("Limits") {
+                Toggle("Show Claude limits", isOn: $model.limitsEnabled)
+            }
+
             Section("Phone") {
                 Toggle("Notify my phone", isOn: $model.pushEnabled)
                 if model.pushEnabled {

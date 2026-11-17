@@ -13,11 +13,13 @@ enum HubLayout {
     static let gapBelowMenuBar: CGFloat = 8
     /// Agents list height before it scrolls: about six one-line rows.
     static let maxListHeight: CGFloat = 6 * 36
+    /// Limits module content: a ring with its label, or up to three lines of text.
+    static let limitsHeight: CGFloat = 54
     /// Transparent room around the content inside the panel, for the glass
     /// shadow and the spring's overshoot.
     static let margin: CGFloat = 24
 
-    static var maxHubHeight: CGFloat { maxListHeight + 2 * modulePadding }
+    static var maxHubHeight: CGFloat { limitsHeight + moduleSpacing + maxListHeight + 4 * modulePadding }
     static var panelSize: CGSize {
         CGSize(width: width + 2 * margin, height: maxHubHeight + 2 * margin)
     }
@@ -52,6 +54,13 @@ struct HubView: View {
         GlassEffectContainer(spacing: HubLayout.containerSpacing) {
             if model.expanded {
                 VStack(spacing: HubLayout.moduleSpacing) {
+                    if model.limits != .off {
+                        LimitsModule(state: model.limits, fromCache: model.limitsFromCache,
+                                     saveFailed: model.limitsSaveFailed, openSettings: model.openSettings)
+                            .padding(HubLayout.modulePadding)
+                            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: HubLayout.cornerRadius,
+                                                                        style: .continuous))
+                    }
                     AgentsModule(sessions: model.sessions, scrollOffset: $scrollOffset)
                         .padding(HubLayout.modulePadding)
                         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: HubLayout.cornerRadius,

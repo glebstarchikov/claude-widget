@@ -51,6 +51,8 @@ final class HubController {
     /// A click that started in the hub is still held: don't close under it.
     private var pressInHub = false
     private var observers: [Any] = []
+    /// Called each time the hub opens.
+    var onOpen: (() -> Void)?
 
     init(model: HubModel, appModel: AppModel) {
         self.model = model
@@ -236,6 +238,7 @@ final class HubController {
         hoverCloseArmed = byHover
         panel.orderFrontRegardless()
         model.expanded = true
+        onOpen?()
         NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
         updateMouseGate()
         logFrame()

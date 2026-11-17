@@ -22,6 +22,11 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(notchProactive, forKey: "notchProactiveEnabled") }
     }
 
+    /// Show Claude's usage limits in the hub. Off stops every Keychain read and network call for them.
+    @Published var limitsEnabled: Bool {
+        didSet { UserDefaults.standard.set(limitsEnabled, forKey: "limitsEnabled") }
+    }
+
     @Published var pushEnabled: Bool {
         didSet {
             UserDefaults.standard.set(pushEnabled, forKey: "pushEnabled")
@@ -63,6 +68,7 @@ final class AppModel: ObservableObject {
         hubHoverEnabled = UserDefaults.standard.bool(forKey: "hubHoverEnabled")
         answerFromNotch = UserDefaults.standard.bool(forKey: "answerFromNotchEnabled")
         notchProactive = UserDefaults.standard.bool(forKey: "notchProactiveEnabled")
+        limitsEnabled = UserDefaults.standard.bool(forKey: "limitsEnabled")
         pushEnabled = UserDefaults.standard.bool(forKey: "pushEnabled")
         pushTopic = UserDefaults.standard.string(forKey: "pushTopic") ?? ""
         launchAtLogin = SMAppService.mainApp.status == .enabled

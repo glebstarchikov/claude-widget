@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import ClaudeWidgetCore
 
 @MainActor
@@ -10,12 +11,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hub: HubController!
     private let pushNotifier = PushNotifier()
     private var settingsWindow: SettingsWindowController!
+    private var usage: UsageMonitor!
+    private var limitsToggle: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: [
             "notchProactiveEnabled": true,
             "hubHoverEnabled": true,
             "answerFromNotchEnabled": true,
+            "limitsEnabled": true,
             "pushEnabled": false,
         ])
 
@@ -31,6 +35,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusController.onRightClick = { [weak self] in self?.showStatusMenu() }
         settingsWindow = SettingsWindowController(model: model)
         if CommandLine.arguments.contains("--show-settings") { settingsWindow.show() }
+        hubModel.openSettings = { [weak self] in
+            self?.hub.close()   // the hub floats above the Settings window
+            self?.settingsWindow.show()
+        }
+
+        usage = UsageMonitor(model: hubModel)
+        hub.onOpen = { [weak self] in self?.usage.refreshIfStale() }
+        // Fires now with the saved setting, then on every change.
+        limitsToggle = model.$limitsEnabled.sink { [weak self] enabled in
+            if enabled { self?.usage.start() } else { self?.usage.stop() }
+        }
 
         monitor = SessionMonitor()
         monitor.onChange = { [weak self] _, new, peeks in
