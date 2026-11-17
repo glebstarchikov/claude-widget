@@ -257,4 +257,12 @@ Exact sizes, paddings, spring constants (start from the spike values above), typ
 
 Incident during the renewal test: the renewed sign-in was not saved (sandbox + an unchanged-value write check that couldn't detect failure), so terminal Claude's refresh token was lost and it needs `/login` again. Lesson folded into §7: every Keychain write is verified with exit status, stderr and a read-back.
 
-**Answer from the notch (pending):** the terminal run was impossible (terminal Claude logged out); the desktop-app probe at `/tmp/claude/hook-test` is waiting for Gleb's run.
+**Answer from the notch (go):** run as three Claude desktop-app Code sessions (Haiku) in `/private/tmp/claude/hook-test`, with a synchronous `PermissionRequest` probe hook that sleeps 5 s:
+
+| Run | Mode | Probe answer | Result |
+|---|---|---|---|
+| d1 | default (asks) | allow after 5 s | hook fired (log: `permission_mode=default`); `touch` ran the same second the hook returned (5.03 s) with no click — **a hook allow is applied in the desktop app** |
+| d2 | default (asks) | deny after 5 s | hook fired; command not run; Claude reported the reason verbatim: **"Denied from the notch"** |
+| d3 | auto | — | **hook did not fire**: auto mode approved the command itself, no prompt was raised |
+
+Not measured: whether the app's own prompt is visible while a synchronous hook runs, and what happens to a hook decision that arrives after the user already answered in the app. The §8 rules make that race unreachable through the widget — the app passes immediately when the session's owning app is frontmost, and passes the moment the owning app becomes frontmost — so those two rules are **mandatory**. In auto mode the widget only sees the prompts auto mode escalates to the user.
