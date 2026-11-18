@@ -296,3 +296,11 @@ Final whole-branch review fixes:
 - **Quit** — SIGTERM quits through the app (socket unlinked); quitting waits up to 5 s for a sign-in renewal in flight to be saved; usage and renewal requests time out (30 s per request, 60 s overall).
 - **Hook process tests (§11) exist** — `Tests/ClaudeWidgetCoreTests/HookProcessTests.swift` spawns the built hook with its home redirected by `CFFIXED_USER_HOME` and a fake app on the socket: no socket, a silent socket, ack + allow / deny / close / pass, and the session write-back.
 - **`--auto-answer`** (verification only) exists in debug builds only.
+
+Follow-up hardening (2026-11-18):
+
+- **Cross-instance renewal lock** — read own entry → renew → save runs under an `flock` on `~/.claude/claude-widget/run/renew.lock` (waits up to 90 s, else nothing is sent). Once the lock is held the entry is read again: a fresher sign-in another instance saved is used without sending anything; an unreadable entry sends nothing; a renewal whose own save failed is still the one renewed.
+- **Renewal verdicts** — only a 400/401/403 from the token endpoint reads as "Sign-in expired"; 429, 5xx, other statuses, timeouts and a renewed token already due read as "Limits unavailable". Inside the 10-minute spacing a renewal that worked never reads as refused. A 200 whose `expires_in` is missing or outside (0, 30 days] keeps both tokens with a 1-hour expiry; a 200 without both tokens is no verdict.
+- **Approval rules in Core** — arrival passes (setting, owner frontmost, no owner, no pill and no open hub, …), owner-became-frontmost, the Allow gate and the 0.5 s settle are `ApprovalRules` / `AllowSettle`, unit-tested; the owner match is case-insensitive, so a case mismatch can only pass.
+- **MCP argument types** — a non-string argument (bool, number, null, array, object) carries a type badge, so `true` and `"true"` never look alike next to Allow.
+- **Small items** — socket and line-reader timeouts clamp `.infinity`/huge values; a `limits` array keeps its valid entries beside a malformed one; `isInstalled` also requires the PermissionRequest `timeout: 60`; the Agents list is one scroll view (bounces only when it overflows), so rows are laid out once.

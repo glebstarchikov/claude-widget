@@ -111,6 +111,40 @@ final class HooksConfigMergerTests: XCTestCase {
         XCTAssertFalse(HooksConfigMerger.isInstalled(settings: oldAsyncSettings))
     }
 
+    private func settings(permissionHook: [String: Any]) -> [String: Any] {
+        var settings = HooksConfigMerger.merge(settings: [:], binaryPath: binPath)
+        var hooks = settings["hooks"] as! [String: Any]
+        hooks["PermissionRequest"] = [["matcher": "*", "hooks": [permissionHook]] as [String: Any]]
+        settings["hooks"] = hooks
+        return settings
+    }
+
+    func testSynchronousEntryNeedsThe60sTimeout() {
+        let command = "\"\(binPath)\" PermissionRequest"
+        func installed(_ extra: [String: Any]) -> Bool {
+            var hook: [String: Any] = ["type": "command", "command": command]
+            hook.merge(extra) { _, new in new }
+            return HooksConfigMerger.isInstalled(settings: settings(permissionHook: hook))
+        }
+        XCTAssertTrue(installed(["timeout": 60]))
+        XCTAssertFalse(installed([:]), "no timeout")
+        XCTAssertFalse(installed(["timeout": 10]), "killed before the 30 s decision wait ends")
+        XCTAssertFalse(installed(["timeout": 600]))
+        XCTAssertFalse(installed(["timeout": "60"]), "a string isn't a timeout")
+        XCTAssertFalse(installed(["timeout": true]))
+        XCTAssertFalse(installed(["timeout": 60, "async": true]), "async never waits for the answer")
+        // A parsed settings file says 60 as an NSNumber: still installed.
+        let parsed = try! JSONSerialization.jsonObject(with: JSONSerialization.data(
+            withJSONObject: settings(permissionHook: ["type": "command", "command": command, "timeout": 60]))) as! [String: Any]
+        XCTAssertTrue(HooksConfigMerger.isInstalled(settings: parsed))
+    }
+
+    func testEditedTimeoutIsRepairedByMerge() {
+        let edited = settings(permissionHook: ["type": "command", "command": "\"\(binPath)\" PermissionRequest", "timeout": 10])
+        XCTAssertFalse(HooksConfigMerger.isInstalled(settings: edited))
+        XCTAssertTrue(HooksConfigMerger.isInstalled(settings: HooksConfigMerger.merge(settings: edited, binaryPath: binPath)))
+    }
+
     func testMergeReplacesOldAsyncEntryWithoutDuplicating() {
         let merged = HooksConfigMerger.merge(settings: oldAsyncSettings, binaryPath: binPath)
         XCTAssertEqual(hookCommands(merged, event: "PermissionRequest").count, 1)

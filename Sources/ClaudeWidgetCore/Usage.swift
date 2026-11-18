@@ -39,8 +39,9 @@ public enum UsageParser {
             throw UsageParseError.notAnObject
         }
         var windows: [UsageWindow] = []
-        if let limits = root["limits"] as? [[String: Any]] {
-            for entry in limits {
+        // One malformed element (a number, a null) mustn't hide the valid windows beside it.
+        if let limits = root["limits"] as? [Any] {
+            for case let entry as [String: Any] in limits {
                 guard let percent = number(entry["percent"]) else { continue }
                 windows.append(UsageWindow(
                     label: label(for: entry),

@@ -27,6 +27,11 @@ public enum WidgetConstants {
     public static var approvalSocket: URL {
         runDir.appendingPathComponent("approve.sock")
     }
+    /// Held (flock) around read-own-entry → renew → save, so two instances of the
+    /// app never both send the same refresh token.
+    public static var renewalLock: URL {
+        runDir.appendingPathComponent("renew.lock")
+    }
     public static var binDir: URL {
         baseDir.appendingPathComponent("bin", isDirectory: true)
     }

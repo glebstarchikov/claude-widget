@@ -68,7 +68,9 @@ struct ApprovalButtons: View {
 /// A request's content, whole, never truncated. Wherever Allow may be offered it
 /// is laid out in exact columns (`ColumnText`), never word-wrapped. MCP arguments
 /// show each key in its own style and column, with the value in the next column
-/// (a hanging indent), so a value's continuation rows can't pass for another `key:` line.
+/// (a hanging indent), so a value's continuation rows can't pass for another `key:`
+/// line. A non-string value carries a type badge (`KindBadge`), so the boolean
+/// true and the string "true" never look alike.
 struct ApprovalSummary: View {
     let approval: PendingApproval
 
@@ -82,6 +84,7 @@ struct ApprovalSummary: View {
                     ForEach(mcp.arguments.indices, id: \.self) { i in
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             KeyText(key: mcp.arguments[i].key)
+                            if mcp.arguments[i].kind != .string { KindBadge(kind: mcp.arguments[i].kind) }
                             ColumnText(text: mcp.arguments[i].value)
                         }
                         .padding(.leading, 12)
@@ -116,6 +119,33 @@ private struct KeyText: View {
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
             .frame(width: min(natural, Self.maxWidth), alignment: .leading)
+    }
+}
+
+/// The JSON type of a non-string MCP argument, in a capsule before its value. No
+/// string can draw one, so a string can never pass for a boolean, number or null.
+private struct KindBadge: View {
+    let kind: MCPCall.ValueKind
+
+    private var label: String {
+        switch kind {
+        case .string: return "string"
+        case .boolean: return "bool"
+        case .number: return "number"
+        case .null: return "null"
+        case .array: return "array"
+        case .object: return "object"
+        }
+    }
+
+    var body: some View {
+        Text(verbatim: label)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .background(.quaternary, in: Capsule())
+            .fixedSize()
+            .accessibilityLabel("\(label) value")
     }
 }
 
@@ -184,37 +214,6 @@ struct ColumnText: View {
 
     private var spaceMark: some View {
         Text(verbatim: "␣").foregroundStyle(.tertiary).frame(width: Self.advance)
-    }
-}
-
-/// An MCP summary split back into its parts. ApprovalPolicy writes the tool name,
-/// then one "key: value" line per argument in sorted-key order; the keys are read
-/// from the request again (not by splitting at ": ", which a key may contain) and
-/// matched scalar by scalar.
-private struct MCPCall {
-    let name: String
-    let arguments: [(key: String, value: String)]
-
-    init?(summary: String, request: ApprovalRequest) {
-        guard request.toolName.hasPrefix("mcp__"),
-              let json = request.toolInput,
-              let input = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any]
-        else { return nil }
-        let lines = summary.unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false)
-        let keys = input.keys.sorted()
-        guard lines.count == keys.count + 1 else { return nil }
-        var arguments: [(key: String, value: String)] = []
-        for (key, line) in zip(keys, lines.dropFirst()) {
-            let prefix = Array((key + ": ").unicodeScalars)
-            guard Array(line.prefix(prefix.count)) == prefix else { return nil }
-            var value = String.UnicodeScalarView()
-            value.append(contentsOf: line.dropFirst(prefix.count))
-            arguments.append((key, String(value)))
-        }
-        var name = String.UnicodeScalarView()
-        name.append(contentsOf: lines[0])
-        self.name = String(name)
-        self.arguments = arguments
     }
 }
 

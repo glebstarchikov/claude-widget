@@ -24,11 +24,15 @@ public enum HooksConfigMerger {
     /// widget's answer and prints Claude Code's decision. Everything else is fire-and-forget.
     static func isSynchronousEvent(_ event: String) -> Bool { event == "PermissionRequest" }
 
+    /// Seconds Claude Code gives the synchronous entry: room for the hook's 0.5 s
+    /// ack and 30 s decision waits, so it's never killed while Gleb is answering.
+    static let synchronousTimeout = 60
+
     static func ourEntry(matcher: String?, binaryPath: String, event: String) -> [String: Any] {
         var hook: [String: Any] = [
             "type": "command",
             "command": "\"\(binaryPath)\" \(event)",
-            "timeout": isSynchronousEvent(event) ? 60 : 10,
+            "timeout": isSynchronousEvent(event) ? synchronousTimeout : 10,
         ]
         if !isSynchronousEvent(event) { hook["async"] = true }
         var entry: [String: Any] = ["hooks": [hook]]
@@ -64,6 +68,9 @@ public enum HooksConfigMerger {
         return result
     }
 
+    /// All entries present, and the PermissionRequest one current: synchronous with
+    /// the 60 s timeout. An older or edited one reads as not installed, so Install
+    /// (which replaces the widget's own entries) shows again.
     public static func isInstalled(settings: [String: Any]) -> Bool {
         guard let hooks = settings["hooks"] as? [String: Any] else { return false }
         return events.allSatisfy { event, _ in
@@ -73,7 +80,7 @@ public enum HooksConfigMerger {
                 let ours = (entry["hooks"] as? [[String: Any]] ?? []).filter {
                     ($0["command"] as? String)?.contains(markerSubstring) == true
                 }
-                return ours.contains { $0["async"] as? Bool != true }
+                return ours.contains { $0["async"] as? Bool != true && $0["timeout"] as? Int == synchronousTimeout }
             }
         }
     }

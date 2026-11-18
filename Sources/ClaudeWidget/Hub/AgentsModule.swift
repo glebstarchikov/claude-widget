@@ -40,14 +40,12 @@ struct AgentsModule: View {
             .padding(.vertical, SessionRow.verticalPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
+            // One scroll view, as tall as its rows up to the cap (CappedHeight), that
+            // only scrolls or bounces once they don't fit. The rows are built once.
             CappedHeight(maxHeight: HubLayout.maxListHeight) {
-                ViewThatFits(in: .vertical) {
-                    rows
-                    RememberedScroll(offset: $scrollOffset, reveal: reveal) { rows }
-                }
+                RememberedScroll(offset: $scrollOffset, reveal: reveal) { rows }
             }
-            // This frame is the visible list either way: all the rows, or the
-            // scroll view's viewport (its content scrolls and clips inside it).
+            // This frame is the scroll view's viewport: the visible list.
             .coordinateSpace(.named(ListViewport.space))
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
             .environment(\.listViewportHeight, viewportHeight)
@@ -99,14 +97,18 @@ private struct UnlistedRequestsRow: View {
     }
 }
 
-/// Offers its content at most `maxHeight` and takes the content's own size.
-/// (`.frame(maxHeight:)` would grow to the max whenever the parent offers more.)
+/// Gives its content the content's ideal height, capped at `maxHeight` (and at
+/// what the parent offers). A vertical scroll view's ideal height is its rows'
+/// height, so the list hugs a few rows and scrolls past the cap. (`.frame(maxHeight:)`
+/// would grow to the max whenever the parent offers more.)
 private struct CappedHeight: Layout {
     let maxHeight: CGFloat
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let height = min(proposal.height ?? maxHeight, maxHeight)
-        return subviews.first?.sizeThatFits(ProposedViewSize(width: proposal.width, height: height)) ?? .zero
+        guard let content = subviews.first else { return .zero }
+        let cap = min(proposal.height ?? maxHeight, maxHeight)
+        let ideal = content.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil)).height
+        return content.sizeThatFits(ProposedViewSize(width: proposal.width, height: min(ideal, cap)))
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
@@ -135,6 +137,7 @@ private struct RememberedScroll<Content: View>: View {
         // ScrollPosition(id:) can't find it; ScrollViewReader finds any `.id` inside.
         ScrollViewReader { proxy in
             ScrollView { content }
+                .scrollBounceBehavior(.basedOnSize)
                 .scrollPosition($position)
                 .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y }) { _, y in
                     offset = y

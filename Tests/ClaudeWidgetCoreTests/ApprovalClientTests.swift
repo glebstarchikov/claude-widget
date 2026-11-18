@@ -242,4 +242,44 @@ final class ApprovalClientTests: XCTestCase {
         XCTAssertNil(reader.next(timeout: 0.5)) // "b" never completed, then EOF
         UnixSocket.close(fds[0])
     }
+
+    // MARK: - Unbounded timeouts
+
+    func testDeadlineNeverTraps() {
+        let now: UInt64 = 1_000_000_000
+        XCTAssertEqual(UnixSocket.deadline(after: 1.5, from: now), now + 1_500_000_000)
+        XCTAssertEqual(UnixSocket.deadline(after: 1000, from: now), now + 1_000_000_000_000)
+        XCTAssertEqual(UnixSocket.deadline(after: 0, from: now), now)
+        XCTAssertEqual(UnixSocket.deadline(after: -3, from: now), now)
+        XCTAssertEqual(UnixSocket.deadline(after: .nan, from: now), now)
+        let clamped = now + UInt64(UnixSocket.maxTimeout * 1_000_000_000)
+        XCTAssertEqual(UnixSocket.deadline(after: .infinity, from: now), clamped)
+        XCTAssertEqual(UnixSocket.deadline(after: 1e300, from: now), clamped)
+        XCTAssertEqual(UnixSocket.deadline(after: .greatestFiniteMagnitude, from: now), clamped)
+        XCTAssertLessThan(UnixSocket.deadline(after: .infinity), UInt64.max / 2, "room left for the ms arithmetic")
+    }
+
+    func testUnboundedTimeoutsReadAndWriteWithoutTrapping() throws {
+        var fds: [Int32] = [0, 0]
+        XCTAssertEqual(socketpair(AF_UNIX, SOCK_STREAM, 0, &fds), 0)
+        defer { UnixSocket.close(fds[0]) }
+        let reader = LineReader(fd: fds[0])
+        XCTAssertTrue(UnixSocket.write(fds[1], Data("one\n".utf8), timeout: .infinity))
+        XCTAssertEqual(reader.next(timeout: .infinity), Data("one".utf8))
+        XCTAssertTrue(UnixSocket.write(fds[1], Data("two\n".utf8), timeout: 1e300))
+        XCTAssertEqual(reader.next(timeout: 1e300), Data("two".utf8))
+        UnixSocket.close(fds[1])
+        XCTAssertNil(reader.next(timeout: .infinity), "EOF still ends an unbounded wait")
+    }
+
+    func testNegativeOrNaNTimeoutDoesNotWait() throws {
+        var fds: [Int32] = [0, 0]
+        XCTAssertEqual(socketpair(AF_UNIX, SOCK_STREAM, 0, &fds), 0)
+        defer { UnixSocket.close(fds[0]); UnixSocket.close(fds[1]) }
+        let reader = LineReader(fd: fds[0])
+        let t0 = Date()
+        XCTAssertNil(reader.next(timeout: -1))
+        XCTAssertNil(reader.next(timeout: .nan))
+        XCTAssertLessThan(Date().timeIntervalSince(t0), 0.05)
+    }
 }

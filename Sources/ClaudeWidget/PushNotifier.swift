@@ -16,7 +16,7 @@ struct PushNotifier {
         post(PushMessage.from(peek))
     }
 
-    /// Manual confirmation alert from the popover's "Send test" button.
+    /// Manual confirmation alert from Settings → Phone → "Send test notification".
     func sendTest() {
         guard !topic.isEmpty else { return }
         post(PushPayload(title: "Claude Widget", body: "Test alert · it works",
