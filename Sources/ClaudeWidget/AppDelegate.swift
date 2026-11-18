@@ -29,7 +29,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // no waiting for a renewal's save. Routed through terminate, it's a normal quit.
         signal(SIGTERM, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        source.setEventHandler { NSApp.terminate(nil) }
+        // Deferred, not called inline: terminate → .terminateLater waits inside this
+        // main-queue block, which would keep the renewal (and its reply) from ever
+        // running — a deadlock while a renewal is in flight.
+        source.setEventHandler { NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0) }
         source.resume()
         sigterm = source
 
