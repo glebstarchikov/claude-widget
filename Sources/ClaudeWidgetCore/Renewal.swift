@@ -177,8 +177,8 @@ public enum RenewalPlan: Equatable, Sendable {
     /// no verdict (that instance keeps retrying its save).
     case spent
     /// As `spent`, but marked over `SpentMarker.lifetime` ago: the instance that
-    /// held the renewal has quit or crashed without saving it, so the sign-in is
-    /// lost. Send nothing; it reads as expired (run /login).
+    /// held the renewal has most likely quit or crashed without saving it, so the
+    /// sign-in reads as lost. Send nothing; it reads as expired (run /login).
     case lost
 
     /// - Parameters:
@@ -210,11 +210,15 @@ public enum RenewalPlan: Equatable, Sendable {
 /// The lock file's record of the last refresh token a renewal spent (the server
 /// rotated it): its fingerprint, never the token, and when it was written.
 public struct SpentMarker: Equatable, Sendable {
-    /// How long a marker only holds renewals back. The instance whose save failed
-    /// retries it every poll (at most 30 min apart), so a marker older than this
-    /// means that instance is gone and the sign-in in the entry is dead. Wall-clock
-    /// time (the file's mtime): a clock change only moves when the label turns
-    /// from "unavailable" to "expired"; nothing is sent either way.
+    /// How long a marker only holds renewals back. Its age is the time since the
+    /// token was spent (only a renewal writes the file; a retried save doesn't touch
+    /// it), not a sign of whether the instance holding the new token is alive. That
+    /// instance retries its save every poll, so by now it has most likely quit or
+    /// crashed without saving, and the entry's sign-in reads as lost. If it's in fact
+    /// still running with failing saves (or Limits off, or the Mac asleep), this
+    /// reads "expired" early. Nothing is sent either way, and its next good save
+    /// puts the live sign-in in the entry. Wall-clock time (the file's mtime): a
+    /// clock change only moves when the label turns from "unavailable" to "expired".
     public static let lifetime: TimeInterval = 1800
 
     public var fingerprint: String

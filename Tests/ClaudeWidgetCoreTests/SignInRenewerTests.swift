@@ -600,4 +600,118 @@ final class SignInRenewerTests: XCTestCase {
         let failed = await f.renewer.adopt(login, replacing: nil)
         XCTAssertEqual(failed, .notSaved)
     }
+
+    // MARK: - A save that reported failure but landed
+
+    /// A's save of U reported failure (a read-back mismatch) but the write landed,
+    /// so the entry holds U. A then renews U → U2 and that save really fails: U is
+    /// spent and in the entry, so it must be marked.
+    func testAnUnsavedSignInThatLandedIsMarkedWhenRenewed() async throws {
+        let path = newLockPath()
+        let u = signIn("u")
+        let a = Instance(lockPath: path)
+        a.renewer.unsaved = u
+        a.entry = .found(u)
+        a.saveWorks = false
+        a.replies = [tokens("AAA-u2", "RRR-u2")]
+        _ = await a.renewer.renew(u)
+        XCTAssertEqual(a.sent, ["RRR-u"])
+        XCTAssertEqual(try marker(at: path), Adoption.fingerprint(refreshToken: "RRR-u"))
+
+        let b = Instance(lockPath: path)
+        b.entry = .found(u)
+        let outcome = await b.renewer.renew(u)
+        XCTAssertEqual(outcome, .notSent)
+        XCTAssertEqual(b.sent, [])
+    }
+
+    /// The same landed save, the other way round: B renews U from the entry (marking
+    /// U, saving U2). A's retry must not put spent U back over U2.
+    func testASpentUnsavedSignInIsDroppedNotSavedOverTheLiveOne() async throws {
+        let path = newLockPath()
+        let u = signIn("u")
+        let b = Instance(lockPath: path)
+        b.entry = .found(u)
+        b.replies = [tokens("AAA-u2", "RRR-u2")]
+        guard case .renewed(let u2) = await b.renewer.renew(u) else { return XCTFail() }
+
+        let a = Instance(lockPath: path)
+        a.renewer.unsaved = u
+        a.entry = b.entry   // the one Keychain both instances share
+        let pending = await a.renewer.retryUnsaved()
+        XCTAssertNil(pending, "nothing pending: read the entry, which holds U2")
+        XCTAssertNil(a.renewer.unsaved)
+        XCTAssertEqual(a.saved, [])
+        XCTAssertEqual(a.entry, .found(u2))
+    }
+
+    /// The normal path: the entry holds R1 (marked), U is pending and was never in
+    /// the entry. The retry saves U; neither landed-save check fires.
+    func testTheNormalRetryStillSavesTheUnsavedSignIn() async throws {
+        let path = newLockPath()
+        let r1 = signIn("r1")
+        let a = await renewedButUnsaved(r1, at: path, into: "u")
+        let u = try XCTUnwrap(a.renewer.unsaved)
+        a.saveWorks = true
+        let pending = await a.renewer.retryUnsaved()
+        XCTAssertEqual(pending, u)
+        XCTAssertNil(a.renewer.unsaved)
+        XCTAssertEqual(a.entry, .found(u))
+        XCTAssertEqual(try marker(at: path), Adoption.fingerprint(refreshToken: "RRR-r1"), "marker untouched")
+    }
+
+    // MARK: - The last save before quitting
+
+    func testQuittingWithAnUnsavedSignInSavesItOnceWithoutARequest() async throws {
+        let path = newLockPath()
+        let a = await renewedButUnsaved(signIn("r1"), at: path, into: "u")
+        let u = try XCTUnwrap(a.renewer.unsaved)
+        a.maySend = false   // quitting
+        a.saveWorks = true
+        let savesBefore = a.saved.count
+        await a.renewer.saveUnsavedBeforeQuit(waitingUpTo: 1)
+        XCTAssertEqual(Array(a.saved.dropFirst(savesBefore)), [u])
+        XCTAssertEqual(a.entry, .found(u))
+        XCTAssertNil(a.renewer.unsaved)
+        XCTAssertEqual(a.sent, ["RRR-r1"], "no request while quitting")
+    }
+
+    func testTheQuitSaveWaitsOnlyBrieflyForTheLock() async throws {
+        let path = newLockPath()
+        let other = try XCTUnwrap(FileLock(path: path))
+        XCTAssertTrue(other.tryLock())
+        let a = Instance(lockPath: path)
+        a.renewer.unsaved = signIn("u")
+        a.maySend = false
+        let start = ProcessInfo.processInfo.systemUptime
+        await a.renewer.saveUnsavedBeforeQuit(waitingUpTo: 0.3)
+        let elapsed = ProcessInfo.processInfo.systemUptime - start
+        XCTAssertGreaterThanOrEqual(elapsed, 0.3, "waits for the lock even though quitting")
+        XCTAssertLessThan(elapsed, 2)
+        XCTAssertEqual(a.saved, [])
+    }
+
+    func testTheQuitSaveNeverSavesASpentSignIn() async throws {
+        let path = newLockPath()
+        let u = signIn("u")
+        let b = Instance(lockPath: path)
+        b.entry = .found(u)
+        b.replies = [tokens("AAA-u2", "RRR-u2")]
+        _ = await b.renewer.renew(u)   // marks U
+
+        let a = Instance(lockPath: path)
+        a.renewer.unsaved = u
+        a.maySend = false
+        await a.renewer.saveUnsavedBeforeQuit(waitingUpTo: 1)
+        XCTAssertEqual(a.saved, [])
+        XCTAssertNil(a.renewer.unsaved)
+    }
+
+    func testTheQuitSaveDoesNothingWithoutAnUnsavedSignIn() async {
+        let a = Instance(lockPath: newLockPath())
+        a.maySend = false
+        await a.renewer.saveUnsavedBeforeQuit(waitingUpTo: 1)
+        XCTAssertEqual(a.saved, [])
+        XCTAssertEqual(a.sent, [])
+    }
 }

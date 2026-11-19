@@ -86,6 +86,11 @@ public final class SignInRenewer {
     private func renewUnderLock(_ credential: OAuthCredential, lock: FileLock) async -> RenewalOutcome {
         let holdingUnsaved = credential == unsaved
         let entry = await readOwn()
+        /// The token is in the entry, where another instance could read and send it.
+        func entryHolds(_ c: OAuthCredential) -> Bool {
+            if case .found(let stored) = entry { return stored.refreshToken == c.refreshToken }
+            return false
+        }
         switch RenewalPlan.afterLock(holding: credential, holdingUnsaved: holdingUnsaved,
                                      entry: entry, spent: marker(in: lock), now: Date()) {
         case .use(let stored):
@@ -108,9 +113,11 @@ public final class SignInRenewer {
                 return .notSent
             }
             let started = ContinuousClock.now
-            // An unsaved renewal's token was never in the entry, so no other instance
-            // can send it; the marker stays on the spent token the entry still holds.
-            let outcome = await sendAndSave(current, lock: lock, markSpent: !holdingUnsaved)
+            // An unsaved renewal's token is usually not in the entry, so no other
+            // instance can send it and the marker stays on the spent token the entry
+            // does hold. But a save that reported failure may have landed (a read-back
+            // mismatch after the write), so it's marked whenever the entry holds it.
+            let outcome = await sendAndSave(current, lock: lock, markSpent: !holdingUnsaved || entryHolds(current))
             spacing.record(outcome, startedAt: started)
             return outcome
         }
@@ -155,13 +162,33 @@ public final class SignInRenewer {
     /// is pending any more: read the entry.
     public func retryUnsaved() async -> OAuthCredential? {
         guard unsaved != nil else { return nil }
-        let retried: OAuthCredential?? = await withLock { _ in
-            guard let pending = self.unsaved else { return nil }
-            if await self.save(pending), self.unsaved == pending { self.unsaved = nil }
-            return pending
-        }
+        let retried = await withLock { await self.savePending(under: $0) }
         // Lock out of reach: use the pending sign-in, unsaved, this poll.
         return retried ?? unsaved
+    }
+
+    /// One last save of the unsaved renewal while quitting, when it's the only copy
+    /// of the live sign-in: the Keychain only, never a request. Under the lock (it
+    /// waits at most `wait`, quitting or not) with the same spent check as
+    /// `retryUnsaved`.
+    public func saveUnsavedBeforeQuit(waitingUpTo wait: TimeInterval) async {
+        guard unsaved != nil else { return }
+        _ = await withLock(waitingUpTo: wait, whileMaySend: false) { await self.savePending(under: $0) }
+    }
+
+    /// Under the lock: saves the pending renewal and returns it, nil if none is
+    /// pending. Not if the marker names it as spent: a save of it that reported
+    /// failure had in fact landed, and another instance has since renewed it from
+    /// the entry. Saving it again would put a dead token over the live one.
+    private func savePending(under lock: FileLock) async -> OAuthCredential? {
+        guard let pending = unsaved else { return nil }
+        if marker(in: lock)?.names(pending) == true {
+            log.error("unsaved sign-in dropped: another instance already renewed it from the entry")
+            unsaved = nil
+            return nil
+        }
+        if await save(pending) { unsaved = nil }
+        return pending
     }
 
     public enum AdoptionSave: Equatable, Sendable {
@@ -201,14 +228,17 @@ public final class SignInRenewer {
 
     // MARK: - Lock
 
-    /// Runs `body` holding the renewal lock; nil if it couldn't be taken.
-    private func withLock<T>(_ body: (FileLock) async -> T) async -> T? {
+    /// Runs `body` holding the renewal lock; nil if it couldn't be taken. Waits up
+    /// to `wait` (default `lockWait`), giving up early once `maySend` turns false
+    /// unless `whileMaySend` is false.
+    private func withLock<T>(waitingUpTo wait: TimeInterval? = nil, whileMaySend: Bool = true,
+                             _ body: (FileLock) async -> T) async -> T? {
         guard let lock = FileLock(path: lockPath) else {
             log.error("renewal lock unavailable")
             return nil
         }
-        let took = await lock.lock(waitingUpTo: lockWait, interval: lockInterval,
-                                   giveUpIf: { @MainActor [weak self] in !(self?.maySend() ?? false) })
+        let took = await lock.lock(waitingUpTo: wait ?? lockWait, interval: lockInterval,
+                                   giveUpIf: { @MainActor [weak self] in whileMaySend && !(self?.maySend() ?? false) })
         guard took else {
             if maySend() {
                 log.error("renewal lock still held by another instance")

@@ -13,6 +13,9 @@ import ClaudeWidgetCore
 final class UsageMonitor {
     private static let staleAfter: TimeInterval = 60
     private static let adoptedHashKey = "limitsAdoptedRefreshHash"
+    /// How long the last save before quitting waits for the renewal lock, inside
+    /// AppDelegate's 5 s quit wait.
+    private static let quitSaveLockWait: TimeInterval = 4
 
     private enum UsageReply { case ok(ProviderUsage), unauthorized, failed }
 
@@ -77,13 +80,17 @@ final class UsageMonitor {
         model.limitsSaveFailed = false
     }
 
-    /// A renewal is in flight. Once it's sent, only its reply holds a live refresh
-    /// token, so quitting before it's saved would lose the sign-in (AppDelegate waits).
-    var renewing: Bool { renewer.renewing }
+    /// Quitting now could lose the sign-in, so AppDelegate waits (at most 5 s): a
+    /// renewal is in flight (once sent, only its reply holds a live refresh token),
+    /// or a renewed sign-in is still unsaved (the only copy is in memory).
+    var needsQuitWait: Bool { renewer.renewing || renewer.unsaved != nil }
 
-    /// Returns once the renewal in flight, if any, has finished: request and verified save.
-    func renewalFinished() async {
+    /// Before quitting: the renewal in flight, if any, finishes (request and
+    /// verified save), then a sign-in still unsaved gets one last save. Keychain
+    /// only; nothing is sent once quitting starts.
+    func finishBeforeQuit() async {
         await renewer.finished()
+        await renewer.saveUnsavedBeforeQuit(waitingUpTo: Self.quitSaveLockWait)
     }
 
     /// Quitting has started: from now on no renewal is sent, and one still waiting
