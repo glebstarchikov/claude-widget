@@ -68,7 +68,7 @@ public enum TokenRefresh {
     }
 
     /// The documented shape only, with an `expires_in` in (0, `maxLifetime`]. A 200
-    /// that isn't goes to `salvage` instead (see `outcome(status:body:now:)`).
+    /// that isn't goes to `salvage` instead (see `outcome(status:body:sent:now:)`).
     public static func parseResponse(_ data: Data, now: Date) throws -> OAuthCredential {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let access = root["access_token"] as? String, !access.isEmpty,

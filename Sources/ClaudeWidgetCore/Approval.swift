@@ -174,9 +174,19 @@ public enum ApprovalPolicy {
                 lines.append("\(key): \(value)")
             }
             guard lines.count <= maxMCPArgLines else { return openOnly }
-            return .allowable(summary: ([name] + lines).joined(separator: "\n"), fitsOneLine: lines.isEmpty)
+            return mcpLaidOut(summary: ([name] + lines).joined(separator: "\n"), fitsOneLine: lines.isEmpty,
+                              request: request, otherwise: openOnly)
         }
         return openOnly
+    }
+
+    /// The hub lays an MCP request out from its `MCPCall` (key column, type badges).
+    /// One that can't be split back into a call is open-only rather than shown
+    /// without them next to Allow: fail closed.
+    static func mcpLaidOut(summary: String, fitsOneLine: Bool, request: ApprovalRequest,
+                           otherwise openOnly: ApprovalPresentation) -> ApprovalPresentation {
+        guard MCPCall(summary: summary, request: request) != nil else { return openOnly }
+        return .allowable(summary: summary, fitsOneLine: fitsOneLine)
     }
 
     /// Allow is offered only where the whole request is visible and laid out

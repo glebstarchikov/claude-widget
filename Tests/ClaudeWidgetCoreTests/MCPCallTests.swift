@@ -60,4 +60,32 @@ final class MCPCallTests: XCTestCase {
         XCTAssertNil(MCPCall(summary: "Bash\na: 1", request: request("Bash", #"{"a":"1"}"#)), "not MCP")
         XCTAssertNil(MCPCall(summary: "mcp__s__t\na: 1", request: request("mcp__s__t", "not json")))
     }
+
+    /// Fail closed: an MCP request the hub can't lay out as a call (key column,
+    /// type badges) is open-only, so no surface offers Allow and answer() refuses it.
+    func testAnMCPRequestThatCantBeSplitBackIsOpenOnly() {
+        let r = request("mcp__s__t", #"{"a":true}"#)
+        let openOnly = ApprovalPresentation.openOnly(summary: "mcp__s__t")
+        let mismatched = ApprovalPolicy.mcpLaidOut(summary: "mcp__s__t\nb: true", fitsOneLine: false,
+                                                   request: r, otherwise: openOnly)
+        XCTAssertEqual(mismatched, openOnly)
+        XCTAssertEqual(ApprovalPolicy.action(for: mismatched, on: .row), .open)
+        XCTAssertEqual(ApprovalRules.answer(allow: true, presentation: mismatched, settled: true), .allowNotOffered)
+        XCTAssertEqual(ApprovalPolicy.mcpLaidOut(summary: "mcp__s__t\na: true", fitsOneLine: false, request: r, otherwise: openOnly),
+                       .allowable(summary: "mcp__s__t\na: true", fitsOneLine: false))
+    }
+
+    func testEveryAllowableMCPRequestSplitsBackWithKinds() {
+        let inputs = [#"{}"#, #"{"a":"x"}"#, #"{"a: b":"v: w","c":1}"#, #"{"f":false,"n":null,"s":"true"}"#,
+                      #"{"a":[1,2],"o":{"k":"v"}}"#, #"{"":"empty key"}"#, #"{"k":""}"#]
+        for input in inputs {
+            let r = request("mcp__srv__tool", input)
+            guard case .allowable(let summary, _) = ApprovalPolicy.presentation(for: r) else {
+                XCTFail("expected allowable: \(input)"); continue
+            }
+            let call = MCPCall(summary: summary, request: r)
+            XCTAssertNotNil(call, input)
+            XCTAssertEqual(call?.name, "mcp__srv__tool", input)
+        }
+    }
 }

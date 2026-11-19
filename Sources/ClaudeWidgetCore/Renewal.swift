@@ -29,8 +29,9 @@ public enum RenewalOutcome: Equatable, Sendable {
     /// the answer says nothing about the token (timeout, 429, 5xx, another status,
     /// a 200 with no tokens in it, a token already due for renewal).
     case inconclusive
-    /// Nothing left the Mac (no network, no host, the renewal lock or the
-    /// widget's entry out of reach). Doesn't count against the renewal spacing.
+    /// Nothing was sent, or it provably never left the Mac: no network or host,
+    /// the renewal lock or the widget's entry out of reach, quitting or Limits off,
+    /// or a refresh token already spent. Doesn't count against the renewal spacing.
     case notSent
 
     /// What the Limits module says when this attempt brought no usable sign-in and
@@ -48,13 +49,14 @@ extension TokenRefresh {
     /// Answers meaning the server refused the refresh token itself.
     static let refusedStatuses: Set<Int> = [400, 401, 403]
 
-    /// Classifies the token endpoint's answer. Only 400/401/403 is a refusal; a 200
-    /// keeps whatever tokens it carries, because the server has already rotated the
-    /// refresh token that was sent and the new one exists nowhere else.
-    public static func outcome(status: Int, body: Data, now: Date) -> RenewalOutcome {
+    /// Classifies the token endpoint's answer to a renewal of `sent`. Only
+    /// 400/401/403 is a refusal; a 200 keeps whatever tokens it carries, because
+    /// the server may already have rotated the refresh token that was sent and the
+    /// new one exists nowhere else.
+    public static func outcome(status: Int, body: Data, sent: OAuthCredential, now: Date) -> RenewalOutcome {
         guard status == 200 else { return refusedStatuses.contains(status) ? .rejected : .inconclusive }
         if let credential = try? parseResponse(body, now: now) { return .renewed(credential) }
-        if let credential = salvage(body, now: now) { return .renewed(credential) }
+        if let credential = salvage(body, sent: sent, now: now) { return .renewed(credential) }
         return .inconclusive
     }
 
@@ -65,19 +67,32 @@ extension TokenRefresh {
 
     /// Whether a 200's body wasn't the documented shape and `outcome` fell back to
     /// `salvage` (for logging; tokens never are).
-    public static func wasSalvaged(_ body: Data, now: Date) -> Bool {
-        (try? parseResponse(body, now: now)) == nil && salvage(body, now: now) != nil
+    public static func wasSalvaged(_ body: Data, sent: OAuthCredential, now: Date) -> Bool {
+        (try? parseResponse(body, now: now)) == nil && salvage(body, sent: sent, now: now) != nil
     }
 
-    /// The access and refresh tokens of a 200 whose `expires_in` is missing or
-    /// unusable, expiring after `salvagedLifetime`. nil without both tokens.
-    static func salvage(_ data: Data, now: Date) -> OAuthCredential? {
-        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let access = root["access_token"] as? String, !access.isEmpty,
-              let refresh = root["refresh_token"] as? String, !refresh.isEmpty
-        else { return nil }
-        return OAuthCredential(accessToken: access, refreshToken: refresh,
-                               expiresAt: now.addingTimeInterval(salvagedLifetime))
+    /// The tokens of a 200 that isn't the documented shape, so none is dropped:
+    /// - both: kept, expiring after `salvagedLifetime`;
+    /// - only an access token: the server didn't rotate, so the refresh token
+    ///   `sent` is still the live one; kept beside the new access token;
+    /// - only a refresh token: it's the live one now, saved beside an access token
+    ///   already marked expired, so it's renewed again (no verdict this poll).
+    /// nil with neither.
+    static func salvage(_ data: Data, sent: OAuthCredential, now: Date) -> OAuthCredential? {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        let access = (root["access_token"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let refresh = (root["refresh_token"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        switch (access, refresh) {
+        case let (access?, refresh?):
+            return OAuthCredential(accessToken: access, refreshToken: refresh, expiresAt: now.addingTimeInterval(salvagedLifetime))
+        case let (access?, nil):
+            return OAuthCredential(accessToken: access, refreshToken: sent.refreshToken,
+                                   expiresAt: now.addingTimeInterval(salvagedLifetime))
+        case let (nil, refresh?):
+            return OAuthCredential(accessToken: sent.accessToken, refreshToken: refresh, expiresAt: .distantPast)
+        case (nil, nil):
+            return nil
+        }
     }
 
     /// A renewed sign-in already within 5 min of expiry is saved (its refresh token
@@ -90,27 +105,26 @@ extension TokenRefresh {
 /// One renewal per 10 minutes, across polls. Inside the window the last attempt's
 /// verdict stands, except that a renewal that worked reads as no verdict: being
 /// asked again so soon (the feed refused the new token, or a stale copy expired)
-/// says nothing against the sign-in.
+/// says nothing against the sign-in. Measured on a monotonic clock that keeps
+/// counting through sleep, so setting the Mac's clock either way can't shorten
+/// or stretch the window.
 public struct RenewalSpacing: Sendable {
-    public static let interval: TimeInterval = 600
+    public static let interval: Duration = .seconds(600)
 
     /// When the last attempt that may have reached the server started, and whether
     /// the server refused it. Never a token.
-    private var last: (at: Date, refused: Bool)?
+    private var last: (at: ContinuousClock.Instant, refused: Bool)?
 
     public init() {}
 
-    /// nil: a renewal may be sent now. Otherwise the outcome that stands for one
-    /// asked for at `now`. A clock set back before the last attempt ends the window.
-    public func standing(at now: Date) -> RenewalOutcome? {
-        guard let last else { return nil }
-        let elapsed = now.timeIntervalSince(last.at)
-        guard elapsed >= 0, elapsed < Self.interval else { return nil }
+    /// nil: a renewal may be sent now. Otherwise the outcome that stands for one asked for at `now`.
+    public func standing(at now: ContinuousClock.Instant) -> RenewalOutcome? {
+        guard let last, now - last.at < Self.interval else { return nil }
         return last.refused ? .rejected : .inconclusive
     }
 
     /// Records an attempt started at `startedAt`. One that never left the Mac gives the slot back.
-    public mutating func record(_ outcome: RenewalOutcome, startedAt: Date) {
+    public mutating func record(_ outcome: RenewalOutcome, startedAt: ContinuousClock.Instant) {
         guard outcome != .notSent else { return }
         last = (startedAt, outcome == .rejected)
     }
@@ -119,7 +133,8 @@ public struct RenewalSpacing: Sendable {
 /// What to do once this instance holds the renewal lock. Another instance may
 /// have renewed the same sign-in while this one waited, rotating the refresh token
 /// it was about to send; sending a rotated-out token gets refused (and, where the
-/// server detects reuse, can revoke the sign-in). So the entry is read again first.
+/// server detects reuse, can revoke the sign-in). So the entry is read again first,
+/// and the lock file's spent-token marker is checked.
 public enum RenewalPlan: Equatable, Sendable {
     /// The entry holds a newer sign-in that's still fresh: use it, send nothing.
     case use(OAuthCredential)
@@ -127,14 +142,29 @@ public enum RenewalPlan: Equatable, Sendable {
     case renew(OAuthCredential)
     /// The entry couldn't be read, so another instance's renewal can't be ruled out: send nothing.
     case skip
+    /// The refresh token that would be sent was already spent: an instance renewed
+    /// it but couldn't save the result, so the entry still holds it. Send nothing;
+    /// no verdict (that instance keeps retrying its save).
+    case spent
 
     /// - Parameters:
     ///   - holding: the sign-in this poll was going to renew.
     ///   - holdingUnsaved: `holding` is a renewal whose save failed, so the entry
     ///     is older than it by construction and only `holding` is live.
     ///   - entry: the widget's entry, read after taking the lock.
-    public static func afterLock(holding: OAuthCredential, holdingUnsaved: Bool,
-                                 entry: StoredSignIn, now: Date) -> RenewalPlan {
+    ///   - spent: the lock file's marker, the fingerprint (`Adoption.fingerprint`)
+    ///     of the last refresh token a renewal spent; nil if none.
+    public static func afterLock(holding: OAuthCredential, holdingUnsaved: Bool, entry: StoredSignIn,
+                                 spent: String?, now: Date) -> RenewalPlan {
+        let plan = beforeMarker(holding: holding, holdingUnsaved: holdingUnsaved, entry: entry, now: now)
+        if case .renew(let c) = plan, let spent, Adoption.fingerprint(refreshToken: c.refreshToken) == spent {
+            return .spent
+        }
+        return plan
+    }
+
+    private static func beforeMarker(holding: OAuthCredential, holdingUnsaved: Bool,
+                                     entry: StoredSignIn, now: Date) -> RenewalPlan {
         if holdingUnsaved { return .renew(holding) }
         switch entry {
         case .failed: return .skip

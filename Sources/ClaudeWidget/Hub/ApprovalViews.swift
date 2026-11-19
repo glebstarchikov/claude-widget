@@ -76,25 +76,26 @@ struct ApprovalSummary: View {
 
     var body: some View {
         let summary = approval.presentation.summary
-        if ApprovalPolicy.action(for: approval.presentation, on: .row) == .allow {
-            if let mcp = MCPCall(summary: summary, request: approval.request) {
-                VStack(alignment: .leading, spacing: 2) {
-                    // In columns too: it reports a width, so a zero-argument tool keeps its Allow.
-                    ColumnText(text: mcp.name)
-                    ForEach(mcp.arguments.indices, id: \.self) { i in
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            KeyText(key: mcp.arguments[i].key)
-                            if mcp.arguments[i].kind != .string { KindBadge(kind: mcp.arguments[i].kind) }
-                            ColumnText(text: mcp.arguments[i].value)
-                        }
-                        .padding(.leading, 12)
+        let allowable = ApprovalPolicy.action(for: approval.presentation, on: .row) == .allow
+        let mcp = MCPCall(summary: summary, request: approval.request)
+        if allowable, let mcp {
+            VStack(alignment: .leading, spacing: 2) {
+                // In columns too: it reports a width, so a zero-argument tool keeps its Allow.
+                ColumnText(text: mcp.name)
+                ForEach(mcp.arguments.indices, id: \.self) { i in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        KeyText(key: mcp.arguments[i].key)
+                        if mcp.arguments[i].kind != .string { KindBadge(kind: mcp.arguments[i].kind) }
+                        ColumnText(text: mcp.arguments[i].value)
                     }
+                    .padding(.leading, 12)
                 }
-            } else {
-                ColumnText(text: summary)
             }
+        } else if allowable, !approval.request.toolName.hasPrefix("mcp__") {
+            ColumnText(text: summary)
         } else {
-            // No Allow anywhere for this request, so plain word wrap is fine here.
+            // No Allow anywhere for this request (an MCP call that can't be split
+            // back is open-only in ApprovalPolicy), so plain word wrap is fine here.
             Text(verbatim: summary)
                 .font(.system(size: 12))
                 .fixedSize(horizontal: false, vertical: true)

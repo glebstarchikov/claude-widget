@@ -33,14 +33,35 @@ public final class FileLock {
     }
 
     /// Takes the lock, checking every `interval` until `timeout` passes. Never
-    /// blocks the calling thread; false if the lock is still held elsewhere.
-    public func lock(waitingUpTo timeout: TimeInterval, interval: Duration = .milliseconds(100)) async -> Bool {
+    /// blocks the calling thread. False if the lock is still held elsewhere, or if
+    /// the task is cancelled or `giveUp` says to stop (both checked before each try).
+    public func lock(waitingUpTo timeout: TimeInterval, interval: Duration = .milliseconds(100),
+                     giveUpIf giveUp: @Sendable () async -> Bool = { false }) async -> Bool {
         let deadline = ProcessInfo.processInfo.systemUptime + max(0, timeout)
-        while !tryLock() {
+        while true {
+            if Task.isCancelled { return false }
+            if await giveUp() { return false }
+            if tryLock() { return true }
             guard ProcessInfo.processInfo.systemUptime < deadline else { return false }
             try? await Task.sleep(for: interval)
         }
-        return true
+    }
+
+    /// The lock file's first bytes, as UTF-8. Read only while holding the lock.
+    public func contents() -> String {
+        var buffer = [UInt8](repeating: 0, count: 256)
+        let count = pread(fd, &buffer, buffer.count, 0)
+        guard count > 0 else { return "" }
+        return String(decoding: buffer[..<count], as: UTF8.self)
+    }
+
+    /// Replaces the lock file's contents. Written only while holding the lock, and
+    /// never a secret: other processes of the same user can read it.
+    @discardableResult
+    public func replaceContents(with text: String) -> Bool {
+        let bytes = Array(text.utf8)
+        let written = bytes.withUnsafeBytes { pwrite(fd, $0.baseAddress, $0.count, 0) }
+        return written == bytes.count && ftruncate(fd, off_t(bytes.count)) == 0
     }
 
     public func unlock() {

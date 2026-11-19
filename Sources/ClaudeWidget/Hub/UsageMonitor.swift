@@ -7,17 +7,12 @@ import ClaudeWidgetCore
 ///
 /// Each poll takes the sign-in (the widget's entry, else Claude Code's,
 /// adopted), renews it if it's within 5 min of expiry, then reads the feed; a
-/// 401/403 renews once and retries once. Renewal is guarded: one in flight, one
-/// per 10 minutes (RenewalSpacing), and its result is saved (verified) before it's
-/// used. Across app instances it runs under a file lock, with the widget's entry
-/// read again once the lock is held (RenewalPlan).
+/// 401/403 renews once and retries once. Renewal itself (one in flight, one per
+/// 10 minutes, under the cross-instance lock, saved before use) is SignInRenewer.
 @MainActor
 final class UsageMonitor {
     private static let staleAfter: TimeInterval = 60
     private static let adoptedHashKey = "limitsAdoptedRefreshHash"
-    /// How long a renewal waits for another instance's: longer than one renewal
-    /// can take (60 s request limit, plus the Keychain read and verified save).
-    private static let lockWait: TimeInterval = 90
 
     private enum UsageReply { case ok(ProviderUsage), unauthorized, failed }
 
@@ -36,16 +31,22 @@ final class UsageMonitor {
     }()
 
     private var running = false
+    /// Set once quitting starts: no renewal may be sent after that (prepareToQuit).
+    private var quitting = false
     private var loop: Task<Void, Never>?
     private var lastAttempt: Date?
     private var lastGood: ProviderUsage?
     private var consecutiveFailures = 0
 
-    private var renewal: Task<RenewalOutcome, Never>?
-    private var spacing = RenewalSpacing()
-    /// A renewed sign-in whose save failed. The refresh token it replaced is
-    /// already dead, so it's kept for this run and the save retried each poll.
-    private var unsaved: OAuthCredential?
+    private lazy var renewer = SignInRenewer(
+        lockPath: WidgetConstants.renewalLock.path,
+        maySend: { [weak self] in self.map { $0.running && !$0.quitting } ?? false },
+        readOwn: { await WidgetKeychain.readOwn() },
+        send: { [weak self] request in
+            guard let self else { throw URLError(.cancelled) }
+            return try await self.send(request)
+        },
+        save: { await WidgetKeychain.save($0) })
 
     init(model: HubModel) { self.model = model }
 
@@ -61,7 +62,7 @@ final class UsageMonitor {
         } else {
             model.limits = .loading
         }
-        model.limitsSaveFailed = unsaved != nil
+        model.limitsSaveFailed = renewer.unsaved != nil
         restartLoop()
     }
 
@@ -78,11 +79,17 @@ final class UsageMonitor {
 
     /// A renewal is in flight. Once it's sent, only its reply holds a live refresh
     /// token, so quitting before it's saved would lose the sign-in (AppDelegate waits).
-    var renewing: Bool { renewal != nil }
+    var renewing: Bool { renewer.renewing }
 
     /// Returns once the renewal in flight, if any, has finished: request and verified save.
     func renewalFinished() async {
-        _ = await renewal?.value
+        await renewer.finished()
+    }
+
+    /// Quitting has started: from now on no renewal is sent, and one still waiting
+    /// for another instance's lock gives up (nothing has been sent, so nothing is lost).
+    func prepareToQuit() {
+        quitting = true
     }
 
     /// On hub open: poll now unless a poll started in the last 60 s. While polls
@@ -172,9 +179,9 @@ final class UsageMonitor {
     /// The sign-in for this poll: one renewed earlier whose save failed (retrying
     /// the save), else the widget's own entry, else Claude Code's, adopted.
     private func signIn() async -> Result<OAuthCredential, LimitsFailure> {
-        if let pending = unsaved {
-            if await WidgetKeychain.save(pending) { unsaved = nil }
-            if active { model.limitsSaveFailed = unsaved != nil }
+        if let pending = renewer.unsaved {
+            if await WidgetKeychain.save(pending) { renewer.unsaved = nil }
+            if active { model.limitsSaveFailed = renewer.unsaved != nil }
             return .success(pending)
         }
         switch await WidgetKeychain.readOwn() {
@@ -202,7 +209,7 @@ final class UsageMonitor {
         guard active else { return nil }
         if await WidgetKeychain.save(theirs) {
             UserDefaults.standard.set(hash, forKey: Self.adoptedHashKey)
-            unsaved = nil   // superseded by the new sign-in
+            renewer.unsaved = nil   // superseded by the new sign-in
             model.limitsSaveFailed = false
             Logger.limits.notice("adopted Claude Code's sign-in")
         } else {
@@ -223,78 +230,11 @@ final class UsageMonitor {
         return .failure(result.failure)
     }
 
-    /// At most one renewal in flight and one per 10 minutes; inside that window
-    /// the last attempt's verdict stands (RenewalSpacing).
     private func renew(_ credential: OAuthCredential) async -> RenewalOutcome {
-        if let renewal { return await renewal.value }
-        if let standing = spacing.standing(at: Date()) {
-            Logger.limits.notice("renewal skipped: one per 10 min")
-            return standing
-        }
         guard active else { return .notSent }
-        // Unstructured, so stopping the poll can't cancel it: once the request is
-        // sent, only the reply holds a live refresh token.
-        let task = Task { await self.lockedRenewal(credential) }
-        renewal = task
-        let result = await task.value
-        renewal = nil
-        return result
-    }
-
-    /// Read own entry → renew → save, all under the cross-instance lock, so another
-    /// copy of the app can't send the same refresh token in between.
-    private func lockedRenewal(_ credential: OAuthCredential) async -> RenewalOutcome {
-        guard let lock = FileLock(path: WidgetConstants.renewalLock.path) else {
-            Logger.limits.error("renewal lock unavailable")
-            return .notSent
-        }
-        guard await lock.lock(waitingUpTo: Self.lockWait) else {
-            Logger.limits.error("renewal lock still held by another instance")
-            return .notSent
-        }
-        defer { lock.unlock() }
-        // Limits turned off while waiting: nothing has been sent, so send nothing.
-        guard running else { return .notSent }
-        let entry = await WidgetKeychain.readOwn()
-        switch RenewalPlan.afterLock(holding: credential, holdingUnsaved: credential == unsaved,
-                                     entry: entry, now: Date()) {
-        case .use(let stored):
-            Logger.limits.notice("renewal skipped: another instance already renewed")
-            return .renewed(stored)
-        case .skip:
-            Logger.limits.error("renewal skipped: own entry unreadable")
-            return .notSent
-        case .renew(let current):
-            let started = Date()
-            let outcome = await performRenewal(current)
-            spacing.record(outcome, startedAt: started)
-            return outcome
-        }
-    }
-
-    private func performRenewal(_ credential: OAuthCredential) async -> RenewalOutcome {
-        let reply: (body: Data, status: Int)
-        do {
-            reply = try await send(TokenRefresh.makeRequest(refreshToken: credential.refreshToken))
-        } catch {
-            Logger.limits.error("renewal request failed (\(Self.errorCode(error)))")
-            return TokenRefresh.outcome(error: error)
-        }
-        Logger.limits.notice("renewal status \(reply.status)")
-        let now = Date()
-        let outcome = TokenRefresh.outcome(status: reply.status, body: reply.body, now: now)
-        guard case .renewed(let renewed) = outcome else { return outcome }
-        if TokenRefresh.wasSalvaged(reply.body, now: now) {
-            Logger.limits.error("renewal response unexpected; kept its tokens with a 1 h expiry")
-        }
-        // Save before use. The refresh token just sent is dead now, so a failed
-        // save keeps the new sign-in in memory and retries each poll.
-        unsaved = await WidgetKeychain.save(renewed) ? nil : renewed
-        if running { model.limitsSaveFailed = unsaved != nil }
-        // Already due for renewal again: no verdict, never a reason to renew again.
-        let usable = TokenRefresh.usable(renewed, now: Date())
-        if usable == .inconclusive { Logger.limits.error("renewed sign-in is already within 5 min of expiry") }
-        return usable
+        let outcome = await renewer.renew(credential)
+        if running { model.limitsSaveFailed = renewer.unsaved != nil }
+        return outcome
     }
 
     // MARK: - Feed

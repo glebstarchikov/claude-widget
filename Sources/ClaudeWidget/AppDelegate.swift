@@ -110,9 +110,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// A renewal in flight finishes and saves first (at most `renewalQuitWait`):
-    /// the refresh token it sent is already spent, and only its reply is live.
+    /// the refresh token it sent is already spent, and only its reply is live. No
+    /// renewal is sent once quitting starts, so one still waiting for another
+    /// instance's lock gives up instead of starting one the wait could cut off.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let usage, usage.renewing else { return .terminateNow }
+        guard let usage else { return .terminateNow }
+        usage.prepareToQuit()
+        guard usage.renewing else { return .terminateNow }
         if quitWaiting { return .terminateLater }
         quitWaiting = true
         Logger.limits.notice("quit waits for the sign-in renewal")
