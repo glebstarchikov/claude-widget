@@ -6,8 +6,8 @@ Claude Code sessions run in a terminal or app you might not be watching. Claude 
 
 States at a glance:
 
-- Indigo, walking: Claude is working.
-- Orange, pulsing: Claude needs you (permission or input).
+- Your theme color, walking: Claude is working.
+- Pulsing with a red dot: Claude needs you (permission or input).
 - Dim gray: asleep, no sessions.
 - Rest on the notch: the hub opens after a short pause, so brushing past doesn't open it. It never takes keyboard focus.
 
@@ -34,7 +34,7 @@ scripts/bundle.sh --install
 
 This builds `Claude Widget.app`, installs it to `/Applications`, and launches it. Then right-click the critter, choose Settings…, and under Hooks choose Install hooks (this backs up `~/.claude/settings.json` first, then merges the hook entries additively, keeping your existing hooks). Every hook runs in the background except `PermissionRequest`, which waits for the widget only while it's running, you're not in the session's app, and the pill or hub is visible, at most 30 seconds. With the widget not running it adds about 10 ms.
 
-Settings (right-click the critter): Launch at login; Open on hover, Show alerts proactively, Answer permission prompts; Show Claude limits; phone alerts via [ntfy](https://ntfy.sh) (only the project folder name leaves your Mac); Install or Remove hooks.
+Settings (right-click the critter): Launch at login; Appearance (theme color, New Year hat); Open on hover, Show alerts proactively, Answer permission prompts; Show Claude limits; phone alerts via [ntfy](https://ntfy.sh) (only the project folder name leaves your Mac); Install or Remove hooks.
 
 Develop and test locally:
 
