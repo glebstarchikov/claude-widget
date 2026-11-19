@@ -2,13 +2,14 @@
 
 A menu bar companion for Claude Code, for anyone who runs long Claude sessions and wants to know their status at a glance, and answer Claude without hunting for the right window.
 
-Claude Code sessions run in a terminal or app you might not be watching. Claude Widget mirrors them in the menu bar: a critter that walks while Claude works, turns orange and pulses when Claude needs you, and sleeps when nothing is running. Rest the pointer on the notch, or click the critter, and a Liquid Glass hub drops out of the notch with every live session (state, model, the app it runs in, current tool, elapsed time, context use, subagents), your Claude usage limits, and any permission prompt waiting for you. Requires macOS 26 (Tahoe) or later.
+Claude Code sessions run in a terminal or app you might not be watching. Claude Widget mirrors them in the menu bar: a critter that walks while Claude works, pulses with a red dot when Claude needs you, and sleeps when nothing is running. Rest the pointer on the notch, or click the critter, and a Liquid Glass hub drops out of the notch with every live session (state, model, the app it runs in, current tool, elapsed time, context use, subagents), your Claude usage limits, and any permission prompt waiting for you. Requires macOS 26 (Tahoe) or later.
 
 States at a glance:
 
-- Indigo, walking: Claude is working.
-- Orange, pulsing: Claude needs you (permission or input).
+- Your theme color (Claude orange by default), walking: Claude is working.
+- Pulsing with a red dot: Claude needs you (permission or input).
 - Dim gray: asleep, no sessions.
+- A little Santa hat on the critter from Dec 15 to Jan 7 (turn it off in Settings).
 - Rest on the notch: the hub opens after a short pause, so brushing past doesn't open it. It never takes keyboard focus.
 
 Claude Code hooks invoke a small compiled `claude-widget-hook` binary that writes one JSON file per session (and per subagent) under `~/.claude/claude-widget/state/`. The app watches that directory and drives the critter and the hub. Session state never leaves your Mac and there is no telemetry; the only network calls are the two optional features below (Claude limits, and phone alerts if you turn them on).
@@ -34,7 +35,7 @@ scripts/bundle.sh --install
 
 This builds `Claude Widget.app`, installs it to `/Applications`, and launches it. Then right-click the critter, choose Settings…, and under Hooks choose Install hooks (this backs up `~/.claude/settings.json` first, then merges the hook entries additively, keeping your existing hooks). Every hook runs in the background except `PermissionRequest`, which waits for the widget only while it's running, you're not in the session's app, and the pill or hub is visible, at most 30 seconds. With the widget not running it adds about 10 ms.
 
-Settings (right-click the critter): Launch at login; Open on hover, Show alerts proactively, Answer permission prompts; Show Claude limits; phone alerts via [ntfy](https://ntfy.sh) (only the project folder name leaves your Mac); Install or Remove hooks.
+Settings (right-click the critter): Launch at login; Appearance (theme color, New Year hat); Open on hover, Show alerts proactively, Answer permission prompts; Show Claude limits; phone alerts via [ntfy](https://ntfy.sh) (only the project folder name leaves your Mac); Install or Remove hooks.
 
 Develop and test locally:
 

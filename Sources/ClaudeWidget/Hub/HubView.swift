@@ -37,6 +37,7 @@ struct HubView: View {
     /// Reports the pill's size (the one with a request is bigger than the plain one).
     let onPillSizeChange: (CGSize) -> Void
 
+    @ObservedObject private var themeStore = ThemeStore.shared
     @State private var scrollOffset: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -70,6 +71,18 @@ struct HubView: View {
                                  answer: model.answerApproval, rowTop: model.approvalRowTop,
                                  reveal: model.revealApprovalId,
                                  scrollOffset: $scrollOffset)
+                        .overlay(alignment: .topTrailing) {
+                            // Static, so Reduce Motion needs nothing extra. Inside the glass
+                            // content (before .glassEffect), so it draws with the rows' text.
+                            if themeStore.hatOn {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "snowflake").font(.system(size: 9))
+                                    Image(systemName: "snowflake").font(.system(size: 6)).offset(y: 5)
+                                }
+                                .foregroundStyle(.secondary)
+                                .allowsHitTesting(false)
+                            }
+                        }
                         .padding(HubLayout.modulePadding)
                         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: HubLayout.cornerRadius,
                                                                     style: .continuous))

@@ -177,7 +177,7 @@ struct SessionRow: View {
     }
 
     private var detailColor: Color {
-        session.state == .needsYou ? Color(nsColor: Theme.claudeOrange) : .secondary
+        session.state == .needsYou ? Color(nsColor: Theme.needsYouRed) : .secondary
     }
 
     private var workingColor: Color {

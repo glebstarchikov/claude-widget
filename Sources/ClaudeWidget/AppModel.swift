@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import ServiceManagement
+import ClaudeWidgetCore
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -25,6 +26,24 @@ final class AppModel: ObservableObject {
     /// Show Claude's usage limits in the hub. Off stops every Keychain read and network call for them.
     @Published var limitsEnabled: Bool {
         didSet { UserDefaults.standard.set(limitsEnabled, forKey: "limitsEnabled") }
+    }
+
+    @Published var theme: ThemeID {
+        didSet { UserDefaults.standard.set(theme.rawValue, forKey: "theme"); applyTheme() }
+    }
+
+    /// `#RRGGBB`, used when `theme` is `.custom`.
+    @Published var customThemeColor: String {
+        didSet { UserDefaults.standard.set(customThemeColor, forKey: "themeCustomColor"); applyTheme() }
+    }
+
+    /// Whether the critter wears a hat during the New Year window.
+    @Published var newYearHat: Bool {
+        didSet { UserDefaults.standard.set(newYearHat, forKey: "newYearHat"); applyTheme() }
+    }
+
+    private func applyTheme() {
+        ThemeStore.shared.apply(id: theme, customHex: customThemeColor, hatSetting: newYearHat)
     }
 
     @Published var pushEnabled: Bool {
@@ -69,9 +88,14 @@ final class AppModel: ObservableObject {
         answerFromNotch = UserDefaults.standard.bool(forKey: "answerFromNotchEnabled")
         notchProactive = UserDefaults.standard.bool(forKey: "notchProactiveEnabled")
         limitsEnabled = UserDefaults.standard.bool(forKey: "limitsEnabled")
+        theme = ThemeID(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .claude
+        let storedColor = UserDefaults.standard.string(forKey: "themeCustomColor") ?? ""
+        customThemeColor = RGB(hex: storedColor) == nil ? ThemePalette.defaultCustom.hex : storedColor
+        newYearHat = UserDefaults.standard.bool(forKey: "newYearHat")
         pushEnabled = UserDefaults.standard.bool(forKey: "pushEnabled")
         pushTopic = UserDefaults.standard.string(forKey: "pushTopic") ?? ""
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        applyTheme()
         refreshHooksStatus()
     }
 
