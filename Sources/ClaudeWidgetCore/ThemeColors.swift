@@ -12,7 +12,7 @@ public struct RGB: Equatable, Sendable {
 
     /// Parses `#RRGGBB` (case-insensitive); anything else is nil.
     public init?(hex: String) {
-        guard hex.count == 7, hex.hasPrefix("#"), let value = UInt32(hex.dropFirst(), radix: 16) else { return nil }
+        guard hex.count == 7, hex.hasPrefix("#"), hex.dropFirst().allSatisfy(\.isHexDigit), let value = UInt32(hex.dropFirst(), radix: 16) else { return nil }
         self.init(r: Double((value >> 16) & 0xFF) / 255,
                   g: Double((value >> 8) & 0xFF) / 255,
                   b: Double(value & 0xFF) / 255)

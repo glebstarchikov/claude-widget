@@ -5,6 +5,7 @@ final class ThemeColorsTests: XCTestCase {
     func testHexRoundTripAndRejects() {
         XCTAssertEqual(RGB(hex: "#d97757")?.hex, "#D97757")
         XCTAssertNil(RGB(hex: "D97757")); XCTAssertNil(RGB(hex: "#D9775")); XCTAssertNil(RGB(hex: "#GG7757"))
+        XCTAssertNil(RGB(hex: "#+12345")); XCTAssertNil(RGB(hex: "#-00000"))
     }
     func testContrastKnownValues() {
         let w = RGB(hex: "#FFFFFF")!, b = RGB(hex: "#000000")!
