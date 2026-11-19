@@ -17,21 +17,26 @@ final class ThemeStore: ObservableObject {
     static let shared = ThemeStore()
 
     @Published private(set) var id: ThemeID = .claude
-    @Published private(set) var pair: ThemePair = ThemePalette.pair(for: .claude, custom: RGB(hex: "#2BB3C0")!)
+    @Published private(set) var pair: ThemePair = ThemePalette.pair(for: .claude, custom: ThemePalette.defaultCustom)
     @Published private(set) var hatOn = false
 
     private var hatSetting = true
 
+    /// The New Year window, or `-newYearPreview YES` on the command line (for previews; no UI, no default).
+    private static func seasonOn(_ now: Date) -> Bool {
+        NewYear.isActive(on: now) || UserDefaults.standard.bool(forKey: "newYearPreview")
+    }
+
     func apply(id: ThemeID, customHex: String, hatSetting: Bool, now: Date = Date()) {
         self.id = id
-        pair = ThemePalette.pair(for: id, custom: RGB(hex: customHex) ?? RGB(hex: "#2BB3C0")!)
+        pair = ThemePalette.pair(for: id, custom: RGB(hex: customHex) ?? ThemePalette.defaultCustom)
         self.hatSetting = hatSetting
-        hatOn = hatSetting && NewYear.isActive(on: now)
+        hatOn = hatSetting && Self.seasonOn(now)
     }
 
     /// Re-checks the New Year window (the date rolled over while running).
     func dayChanged(now: Date = Date()) {
-        let on = hatSetting && NewYear.isActive(on: now)
+        let on = hatSetting && Self.seasonOn(now)
         if on != hatOn { hatOn = on }
     }
 }

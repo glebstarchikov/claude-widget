@@ -18,8 +18,8 @@ enum CritterRenderer {
             context.setFillColor(color.withAlphaComponent(opacity).cgColor)
             context.fillPath(using: .evenOdd)
             context.restoreGState()
-            if hat { drawHat(in: context) }
-            if badge { drawBadge(in: context) }
+            if hat { drawHat(in: context, opacity: opacity) }
+            if badge { drawBadge(in: context, hat: hat) }
             return true
         }
         return image
@@ -31,7 +31,8 @@ enum CritterRenderer {
                       transform: nil)
     }
 
-    private static func drawHat(in context: CGContext) {
+    /// The hat is drawn at the body's opacity so a sleeping critter carries no bright red.
+    private static func drawHat(in context: CGContext, opacity: CGFloat) {
         let red = NSColor(srgbRed: 0xD9 / 255, green: 0x3A / 255, blue: 0x3A / 255, alpha: 1).cgColor
         let hairline = NSColor(white: 0, alpha: 0.35).cgColor
         let brim = CGPath(roundedRect: CritterGeometry.hatBrim, cornerWidth: 0.9, cornerHeight: 0.9, transform: nil)
@@ -40,6 +41,9 @@ enum CritterRenderer {
             (brim, NSColor.white.cgColor),
             (circlePath(CritterGeometry.hatPom), NSColor.white.cgColor),
         ]
+        context.setAlpha(opacity)
+        context.beginTransparencyLayer(auxiliaryInfo: nil)
+        defer { context.endTransparencyLayer(); context.setAlpha(1) }
         for (path, fill) in parts {
             context.addPath(path)
             context.setFillColor(fill)
@@ -51,13 +55,14 @@ enum CritterRenderer {
         }
     }
 
-    private static func drawBadge(in context: CGContext) {
+    private static func drawBadge(in context: CGContext, hat: Bool) {
+        let dot = CritterGeometry.badge(hat: hat)
         context.saveGState()
         context.setBlendMode(.clear)
-        context.addPath(circlePath(CritterGeometry.badge, grownBy: CritterGeometry.badgeGap))
+        context.addPath(circlePath(dot, grownBy: CritterGeometry.badgeGap))
         context.fillPath()
         context.restoreGState()
-        context.addPath(circlePath(CritterGeometry.badge))
+        context.addPath(circlePath(dot))
         context.setFillColor(NSColor.systemRed.cgColor)
         context.fillPath()
     }

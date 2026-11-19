@@ -57,7 +57,7 @@ public enum CritterGeometry {
     /// coordinates already include this shift; `bodyRects` itself is unchanged.
     public static let hatBodyShift: CGFloat = 3
 
-    /// Centered cone whose tip flops to the right.
+    /// Cone centered over the body; its tip bends back to the left, so the pom hangs left of center.
     public static func hatCone() -> CGPath {
         let path = CGMutablePath()
         path.move(to: CGPoint(x: 8, y: 6.6))
@@ -67,10 +67,16 @@ public enum CritterGeometry {
         path.closeSubpath()
         return path
     }
-    public static let hatBrim = CGRect(x: 7, y: 6.3, width: 10, height: 1.8)
+    public static let hatBrim = CGRect(x: 7.6, y: 6.3, width: 8.8, height: 1.8)
     public static let hatPom = Circle2D(center: CGPoint(x: 11, y: 1.6), radius: 1.25)
 
     /// Top-right "needs you" dot; `badgeGap` is the clear ring cut around it.
     public static let badge = Circle2D(center: CGPoint(x: 20.2, y: 3.8), radius: 2.6)
     public static let badgeGap: CGFloat = 1.2
+
+    /// The badge as drawn: with the hat the body is shifted down, so the badge moves
+    /// with it and keeps sitting on the body's top-right corner.
+    public static func badge(hat: Bool) -> Circle2D {
+        hat ? Circle2D(center: CGPoint(x: badge.center.x, y: badge.center.y + hatBodyShift), radius: badge.radius) : badge
+    }
 }

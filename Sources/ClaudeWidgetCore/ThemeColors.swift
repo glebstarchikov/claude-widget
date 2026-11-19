@@ -90,7 +90,10 @@ public enum ThemePalette {
     /// Pure white, used on dark accent fills.
     public static let white = RGB(hex: "#FFFFFF")!
 
-    private static let black = RGB(hex: "#000000")!
+    /// The custom theme color before the user picks one.
+    public static let defaultCustom = RGB(hex: "#2BB3C0")!
+
+    static let black = RGB(hex: "#000000")!
 
     private static func preset(_ light: String, _ dark: String) -> ThemePair {
         ThemePair(light: RGB(hex: light)!, dark: RGB(hex: dark)!)

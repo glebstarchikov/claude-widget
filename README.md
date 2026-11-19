@@ -6,9 +6,10 @@ Claude Code sessions run in a terminal or app you might not be watching. Claude 
 
 States at a glance:
 
-- Your theme color, walking: Claude is working.
+- Your theme color (Claude orange by default), walking: Claude is working.
 - Pulsing with a red dot: Claude needs you (permission or input).
 - Dim gray: asleep, no sessions.
+- A little Santa hat on the critter from Dec 15 to Jan 7 (turn it off in Settings).
 - Rest on the notch: the hub opens after a short pause, so brushing past doesn't open it. It never takes keyboard focus.
 
 Claude Code hooks invoke a small compiled `claude-widget-hook` binary that writes one JSON file per session (and per subagent) under `~/.claude/claude-widget/state/`. The app watches that directory and drives the critter and the hub. Session state never leaves your Mac and there is no telemetry; the only network calls are the two optional features below (Claude limits, and phone alerts if you turn them on).

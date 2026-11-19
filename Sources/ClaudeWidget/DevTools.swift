@@ -42,7 +42,12 @@ enum DevTools {
             ("needsyou", .idle, 1.0, false, true),
             ("asleep", .asleep, 0.45, false, false),
             ("needsyou-hat", .idle, 1.0, true, true),
+            ("working-hat", .walkA, 1.0, true, false),
+            ("asleep-hat", .asleep, 0.45, true, false),
+            ("ready-hat", .idle, 0.70, true, false),
         ]
+        // Montage columns, in order (18 pt at 2x = 36 px, then enlarged 4x without smoothing).
+        let montageColumns = ["working", "needsyou", "asleep", "working-hat", "needsyou-hat", "asleep-hat"]
         let bars: [(String, RGB, Bool)] = [("light", ThemePalette.lightBar, false), ("dark", ThemePalette.darkBar, true)]
         for theme in [ThemeID.claude, .system, .indigo] {
             let pair = ThemePalette.pair(for: theme, custom: custom)
@@ -51,7 +56,7 @@ enum DevTools {
                 let faint = dark ? Theme.faintDark : Theme.faintLight
                 for (name, pose, opacity, hat, badge) in states {
                     let color = pose == .asleep ? faint : themed
-                    for size in [18, 72] as [CGFloat] {
+                    for size in [18, 36, 72] as [CGFloat] {
                         let critter = CritterRenderer.image(pose: pose, color: color, opacity: opacity,
                                                             pointSize: size, hat: hat, badge: badge)
                         let canvas = NSImage(size: NSSize(width: size + 8, height: size + 8), flipped: true) { rect in
@@ -63,6 +68,25 @@ enum DevTools {
                         writePNG(canvas, to: out.appendingPathComponent("\(theme.rawValue)-\(name)-\(barName)-\(Int(size)).png"))
                     }
                 }
+                // Montage at 18 pt 2x.
+                let tile: CGFloat = 44, zoom: CGFloat = 4
+                let montage = NSImage(size: NSSize(width: tile * CGFloat(montageColumns.count), height: tile), flipped: true) { rect in
+                    ns(bar).setFill()
+                    rect.fill()
+                    for (i, column) in montageColumns.enumerated() {
+                        guard let (_, pose, opacity, hat, badge) = states.first(where: { $0.0 == column }) else { continue }
+                        let critter = CritterRenderer.image(pose: pose, color: pose == .asleep ? faint : themed, opacity: opacity,
+                                                            pointSize: 36, hat: hat, badge: badge)
+                        critter.draw(in: NSRect(x: CGFloat(i) * tile + 4, y: 4, width: 36, height: 36))
+                    }
+                    return true
+                }
+                let big = NSImage(size: NSSize(width: montage.size.width * zoom, height: tile * zoom), flipped: true) { rect in
+                    NSGraphicsContext.current?.imageInterpolation = .none
+                    montage.draw(in: rect)
+                    return true
+                }
+                writePNG(big, to: out.appendingPathComponent("montage-\(theme.rawValue)-\(barName)-18pt-2x.png"))
             }
         }
     }

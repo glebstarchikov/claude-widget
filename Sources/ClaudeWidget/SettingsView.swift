@@ -85,7 +85,7 @@ struct SettingsView: View {
     /// The custom color as a SwiftUI color; picking one also selects the Custom theme.
     private var customColor: Binding<Color> {
         Binding(
-            get: { color(RGB(hex: model.customThemeColor) ?? RGB(r: 0.17, g: 0.7, b: 0.75)) },
+            get: { color(RGB(hex: model.customThemeColor) ?? ThemePalette.defaultCustom) },
             set: { newValue in
                 guard let c = NSColor(newValue).usingColorSpace(.sRGB) else { return }
                 model.customThemeColor = RGB(r: Double(c.redComponent), g: Double(c.greenComponent), b: Double(c.blueComponent)).hex
@@ -101,10 +101,13 @@ struct SettingsView: View {
             switch id {
             case .custom:
                 Button { model.theme = id } label: {
-                    Circle().fill(customColor.wrappedValue)
+                    let fitted = ThemePalette.pair(for: .custom, custom: RGB(hex: model.customThemeColor) ?? ThemePalette.defaultCustom)
+                    Circle().fill(color(colorScheme == .dark ? fitted.dark : fitted.light))
+                        .overlay(Circle().strokeBorder(.quaternary, lineWidth: 1))
                         .frame(width: 22, height: 22)
                 }
                 .buttonStyle(.plain)
+                .help("Custom (red is kept for needs you)")
             case .system:
                 Button { model.theme = id } label: {
                     HStack(spacing: 0) {

@@ -45,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "limitsEnabled": true,
             "pushEnabled": false,
             "theme": "claude",
-            "themeCustomColor": "#2BB3C0",
+            "themeCustomColor": ThemePalette.defaultCustom.hex,
             "newYearHat": true,
         ])
 

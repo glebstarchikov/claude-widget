@@ -36,6 +36,16 @@ final class ThemeColorsTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(p.dark.contrast(with: ThemePalette.darkBar), 3, hex)
         }
     }
+    func testFittingStopsAtTheFirstPassingStep() {
+        let c = RGB(hex: "#FFF2A8")!
+        let fitted = c.fitted(against: ThemePalette.lightBar, toward: ThemePalette.black)
+        XCTAssertGreaterThanOrEqual(fitted.contrast(with: ThemePalette.lightBar), 3)
+        var fraction = 0.0
+        for step in 1...20 where c.mixed(with: ThemePalette.black, fraction: Double(step) * 0.05) == fitted { fraction = Double(step) * 0.05 }
+        XCTAssertGreaterThan(fraction, 0.05, "this color needs fitting")
+        let previous = c.mixed(with: ThemePalette.black, fraction: fraction - 0.05)
+        XCTAssertLessThan(previous.contrast(with: ThemePalette.lightBar), 3, "one step less mixed must fail")
+    }
     func testCustomThatAlreadyPassesIsUntouched() {   // negative: fitting must not drift a good color
         let p = ThemePalette.pair(for: .custom, custom: RGB(hex: "#2C7FE0")!)
         XCTAssertEqual(p.light.hex, "#2C7FE0"); XCTAssertEqual(p.dark.hex, "#2C7FE0")

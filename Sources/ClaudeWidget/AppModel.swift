@@ -90,7 +90,7 @@ final class AppModel: ObservableObject {
         limitsEnabled = UserDefaults.standard.bool(forKey: "limitsEnabled")
         theme = ThemeID(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .claude
         let storedColor = UserDefaults.standard.string(forKey: "themeCustomColor") ?? ""
-        customThemeColor = RGB(hex: storedColor) == nil ? "#2BB3C0" : storedColor
+        customThemeColor = RGB(hex: storedColor) == nil ? ThemePalette.defaultCustom.hex : storedColor
         newYearHat = UserDefaults.standard.bool(forKey: "newYearHat")
         pushEnabled = UserDefaults.standard.bool(forKey: "pushEnabled")
         pushTopic = UserDefaults.standard.string(forKey: "pushTopic") ?? ""
