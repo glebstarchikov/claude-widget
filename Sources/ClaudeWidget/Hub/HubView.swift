@@ -71,23 +71,23 @@ struct HubView: View {
                                  answer: model.answerApproval, rowTop: model.approvalRowTop,
                                  reveal: model.revealApprovalId,
                                  scrollOffset: $scrollOffset)
+                        .overlay(alignment: .topTrailing) {
+                            // Static, so Reduce Motion needs nothing extra. Inside the glass
+                            // content (before .glassEffect), so it draws with the rows' text.
+                            if themeStore.hatOn {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "snowflake").font(.system(size: 9))
+                                    Image(systemName: "snowflake").font(.system(size: 6)).offset(y: 5)
+                                }
+                                .foregroundStyle(.secondary)
+                                .allowsHitTesting(false)
+                            }
+                        }
                         .padding(HubLayout.modulePadding)
                         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: HubLayout.cornerRadius,
                                                                     style: .continuous))
                 }
                 .frame(width: HubLayout.width)
-                .overlay(alignment: .topTrailing) {
-                    // Static, so Reduce Motion needs nothing extra.
-                    if themeStore.hatOn {
-                        HStack(spacing: 3) {
-                            Image(systemName: "snowflake").font(.system(size: 9))
-                            Image(systemName: "snowflake").font(.system(size: 6)).offset(y: 5)
-                        }
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 6).padding(.trailing, 10)
-                        .allowsHitTesting(false)
-                    }
-                }
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { onHubHeightChange($0) }
                 .transition(transition)
             } else if case .needsYou? = model.pill, let first = model.pending.first {

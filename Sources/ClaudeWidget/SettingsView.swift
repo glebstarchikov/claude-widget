@@ -15,13 +15,10 @@ struct SettingsView: View {
             Section("Appearance") {
                 HStack(spacing: 10) {
                     ForEach(ThemeID.allCases, id: \.self) { id in swatch(id) }
-                    ColorPicker("Custom color", selection: customColor, supportsOpacity: false)
-                        .labelsHidden()
-                        .help("Choose custom color")
-                        .accessibilityLabel("Custom color")
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 4)
+                ColorPicker("Custom color", selection: customColor, supportsOpacity: false)
                 Toggle("New Year hat", isOn: $model.newYearHat)
                 Text("Dec 15 \u{2013} Jan 7")
                     .font(.callout)

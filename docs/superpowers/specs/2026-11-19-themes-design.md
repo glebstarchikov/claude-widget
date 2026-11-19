@@ -35,7 +35,7 @@ No red theme: red means "needs you".
 
 **Contrast rule** (presets above were derived with it; Custom applies it at runtime): the color must reach **3:1** contrast (WCAG relative luminance) against the reference bar — `#ECECEE` for light, `#26262A` for dark. If it doesn't, mix it toward black (light) or white (dark) in 5 % steps until it does.
 
-**What a theme colors:** the critter everywhere (menu bar, hub, pill, Agents rows), the Allow button fill, and the limit bars. The glass itself stays untinted. The light/dark value follows the surface it's drawn on (menu bar appearance for the status item, glass appearance in the hub). Text on the Allow fill is white or `#1D1D1F`, whichever contrasts more with that fill.
+**What a theme colors:** the critter everywhere (menu bar, hub, pill, Agents rows), the Allow button fill, and the limit bars. The glass itself stays untinted. The light/dark value follows the surface it's drawn on (menu bar appearance for the status item, glass appearance in the hub). Text on the Allow fill is white unless white has less than 3:1 contrast (WCAG relative luminance) against that fill, then `#1D1D1F`. Gleb chose white text on 2026-11-19 after the live check.
 
 ### New Year hat [Gleb chose the winter hat with the floppy tip]
 A red winter hat (`#D93A3A`) with a white brim and a white pom: the cone sits centred on the body and its tip flops over, so the pom hangs slightly to the side (the second mockup). Drawn in code like the critter, so it stays sharp. The hub also shows a little snow. It switches on by itself from **Dec 15 to Jan 7** (inclusive, local calendar); a Settings switch turns it off.

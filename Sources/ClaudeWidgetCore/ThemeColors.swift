@@ -116,9 +116,10 @@ public enum ThemePalette {
         }
     }
 
-    /// Text color with the higher contrast on an accent `fill`: white or near-black.
+    /// Text color on an accent `fill`: white, unless white has less than 3:1 contrast
+    /// against the fill, in which case near-black.
     public static func onAccent(_ fill: RGB) -> RGB {
-        fill.contrast(with: white) >= fill.contrast(with: darkText) ? white : darkText
+        fill.contrast(with: white) >= 3 ? white : darkText
     }
 }
 

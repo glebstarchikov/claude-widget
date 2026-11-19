@@ -50,13 +50,24 @@ final class ThemeColorsTests: XCTestCase {
         let p = ThemePalette.pair(for: .custom, custom: RGB(hex: "#2C7FE0")!)
         XCTAssertEqual(p.light.hex, "#2C7FE0"); XCTAssertEqual(p.dark.hex, "#2C7FE0")
     }
-    func testOnAccentPicksTheHigherContrast() {
+    func testOnAccentIsWhiteUnlessItFallsBelowThreeToOne() {
         XCTAssertEqual(ThemePalette.onAccent(RGB(hex: "#4B46F5")!), ThemePalette.white)
-        XCTAssertEqual(ThemePalette.onAccent(RGB(hex: "#6FAE2C")!), ThemePalette.darkText)
+        XCTAssertEqual(ThemePalette.onAccent(RGB(hex: "#6FAE2C")!), ThemePalette.darkText)  // white is 2.7:1
     }
     func testOnAccentForMacOSAccentColors() {
         XCTAssertEqual(ThemePalette.onAccent(RGB(hex: "#FFCC00")!), ThemePalette.darkText)  // yellow
-        XCTAssertEqual(ThemePalette.onAccent(RGB(hex: "#953D96")!), ThemePalette.white)     // purple (#007AFF blue actually favors dark text by contrast)
+        XCTAssertEqual(ThemePalette.onAccent(RGB(hex: "#953D96")!), ThemePalette.white)     // purple
+        XCTAssertEqual(ThemePalette.onAccent(RGB(hex: "#007AFF")!), ThemePalette.white)     // macOS blue, ~4.0:1
+    }
+    func testOnAccentIsWhiteOnClaudeOrange() {
+        XCTAssertEqual(ThemePalette.onAccent(RGB(hex: "#D97757")!), ThemePalette.white)     // ~3.1:1
+        XCTAssertEqual(ThemePalette.onAccent(RGB(hex: "#C36B4E")!), ThemePalette.white)
+    }
+    func testOnAccentStaysDarkJustUnderThreeToOne() {   // negative: the white rule must not swallow fills below 3:1
+        let fill = RGB(hex: "#E07A5A")!
+        let ratio = fill.contrast(with: ThemePalette.white)
+        XCTAssertLessThan(ratio, 3); XCTAssertGreaterThan(ratio, 2.8)
+        XCTAssertEqual(ThemePalette.onAccent(fill), ThemePalette.darkText)
     }
     func testNewYearWindowBoundaries() {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "Europe/Amsterdam")!
