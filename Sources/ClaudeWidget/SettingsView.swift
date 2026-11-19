@@ -15,6 +15,10 @@ struct SettingsView: View {
             Section("Appearance") {
                 HStack(spacing: 10) {
                     ForEach(ThemeID.allCases, id: \.self) { id in swatch(id) }
+                    ColorPicker("Custom color", selection: customColor, supportsOpacity: false)
+                        .labelsHidden()
+                        .help("Choose custom color")
+                        .accessibilityLabel("Custom color")
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 4)
@@ -96,10 +100,11 @@ struct SettingsView: View {
         Group {
             switch id {
             case .custom:
-                ColorPicker("Custom", selection: customColor, supportsOpacity: false)
-                    .labelsHidden()
-                    .frame(width: 22, height: 22)
-                    .clipShape(Circle())
+                Button { model.theme = id } label: {
+                    Circle().fill(customColor.wrappedValue)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
             case .system:
                 Button { model.theme = id } label: {
                     HStack(spacing: 0) {
