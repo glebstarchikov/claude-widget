@@ -248,39 +248,60 @@ final class RenewalTests: XCTestCase {
         }
     }
 
+    /// A marker written `ago` seconds before `now` for `credential`'s refresh token.
+    private func marked(_ credential: OAuthCredential, ago: TimeInterval = 60) -> SpentMarker {
+        SpentMarker(fingerprint: Adoption.fingerprint(refreshToken: credential.refreshToken),
+                    markedAt: now.addingTimeInterval(-ago))
+    }
+
+    private func plan(_ holding: OAuthCredential, unsaved: Bool = false, entry: StoredSignIn,
+                      spent: SpentMarker?) -> RenewalPlan {
+        RenewalPlan.afterLock(holding: holding, holdingUnsaved: unsaved, entry: entry, spent: spent, now: now)
+    }
+
     func testSpentTokenIsNeverSent() {
         // Another instance renewed "held" (the server rotated it) but its save
         // failed, so the entry still holds it.
         let held = credential("held", expiresIn: 60)
-        let marker = Adoption.fingerprint(refreshToken: held.refreshToken)
-        XCTAssertEqual(RenewalPlan.afterLock(holding: held, holdingUnsaved: false, entry: .found(held), spent: marker, now: now),
-                       .spent)
-        XCTAssertEqual(RenewalPlan.afterLock(holding: held, holdingUnsaved: false, entry: .absent, spent: marker, now: now),
-                       .spent)
+        XCTAssertEqual(plan(held, entry: .found(held), spent: marked(held)), .spent)
+        XCTAssertEqual(plan(held, entry: .absent, spent: marked(held)), .spent)
         // The entry's own due token, when it's the spent one.
         let stored = credential("stored", expiresIn: 60)
-        XCTAssertEqual(RenewalPlan.afterLock(holding: credential("older"), holdingUnsaved: false, entry: .found(stored),
-                                             spent: Adoption.fingerprint(refreshToken: stored.refreshToken), now: now),
-                       .spent)
+        XCTAssertEqual(plan(credential("older"), entry: .found(stored), spent: marked(stored)), .spent)
     }
 
     func testSpentMarkerBlocksOnlyThatToken() {
         let held = credential("held", expiresIn: 60)
-        let other = Adoption.fingerprint(refreshToken: "RRR-someone-else")
-        XCTAssertEqual(RenewalPlan.afterLock(holding: held, holdingUnsaved: false, entry: .found(held), spent: other, now: now),
-                       .renew(held))
-        XCTAssertEqual(RenewalPlan.afterLock(holding: held, holdingUnsaved: false, entry: .found(held), spent: "", now: now),
-                       .renew(held))
+        let other = SpentMarker(fingerprint: Adoption.fingerprint(refreshToken: "RRR-someone-else"), markedAt: now)
+        XCTAssertEqual(plan(held, entry: .found(held), spent: other), .renew(held))
+        XCTAssertEqual(plan(held, entry: .found(held), spent: SpentMarker(fingerprint: "", markedAt: now)), .renew(held))
         // A marker never stops using a fresh sign-in another instance saved.
         let fresh = credential("fresh")
-        XCTAssertEqual(RenewalPlan.afterLock(holding: held, holdingUnsaved: false, entry: .found(fresh),
-                                             spent: Adoption.fingerprint(refreshToken: held.refreshToken), now: now),
-                       .use(fresh))
+        XCTAssertEqual(plan(held, entry: .found(fresh), spent: marked(held)), .use(fresh))
         // Nor an unsaved renewal, whose token is the live one.
         let unsaved = credential("unsaved", expiresIn: 60)
-        XCTAssertEqual(RenewalPlan.afterLock(holding: unsaved, holdingUnsaved: true, entry: .found(held),
-                                             spent: Adoption.fingerprint(refreshToken: held.refreshToken), now: now),
-                       .renew(unsaved))
+        XCTAssertEqual(plan(unsaved, unsaved: true, entry: .found(held), spent: marked(held)), .renew(unsaved))
+    }
+
+    /// The instance that marked it quit or crashed before its save went through:
+    /// the entry's token is dead and its replacement gone.
+    func testAnOldMarkerMeansTheSignInIsLost() {
+        let held = credential("held", expiresIn: 60)
+        XCTAssertEqual(plan(held, entry: .found(held), spent: marked(held, ago: SpentMarker.lifetime)), .lost)
+        XCTAssertEqual(plan(held, entry: .found(held), spent: marked(held, ago: 6 * 3600)), .lost)
+        XCTAssertEqual(plan(held, entry: .found(held), spent: marked(held, ago: SpentMarker.lifetime - 1)), .spent,
+                       "still young: the renewing instance may yet save")
+        XCTAssertEqual(plan(held, entry: .found(held), spent: marked(held, ago: -3600)), .spent,
+                       "a mark from the future (clock set back) reads as young")
+    }
+
+    func testAnOldMarkerBlocksOnlyThatToken() {
+        let held = credential("held", expiresIn: 60)
+        let old = SpentMarker(fingerprint: Adoption.fingerprint(refreshToken: "RRR-someone-else"),
+                              markedAt: now.addingTimeInterval(-6 * 3600))
+        XCTAssertEqual(plan(held, entry: .found(held), spent: old), .renew(held))
+        let fresh = credential("fresh")
+        XCTAssertEqual(plan(held, entry: .found(fresh), spent: marked(held, ago: 6 * 3600)), .use(fresh))
     }
 
     // MARK: - Adoption

@@ -4,11 +4,13 @@ import os
 private let log = Logger(subsystem: "com.glebstarchikov.claude-widget", category: "limits")
 
 /// Renews the widget's sign-in (spec §7). At most one renewal in flight and one
-/// per 10 minutes (RenewalSpacing). Each one runs under the cross-instance lock:
-/// the widget's entry is read again (RenewalPlan), a refresh token already spent
-/// is never sent, and the result is saved (verified) before it's used. The
-/// Keychain, the network and whether sending is still allowed come in as
-/// closures, so the whole sequence is tested here rather than in the app.
+/// per 10 minutes (RenewalSpacing). Every write to the widget's entry (a
+/// renewal's save, the retry of one that failed, an adoption of Claude Code's
+/// sign-in) runs under the cross-instance renewal lock, so two of them never
+/// race, in this process or another. A renewal reads the entry again under it
+/// (RenewalPlan), never sends a refresh token already spent, and saves its result
+/// (verified) before it's used. The Keychain, the network and whether sending is
+/// still allowed come in as closures, so all of this is tested here, not in the app.
 @MainActor
 public final class SignInRenewer {
     private let lockPath: String
@@ -23,9 +25,9 @@ public final class SignInRenewer {
     private var inFlight: Task<RenewalOutcome, Never>?
 
     /// A renewed sign-in whose save failed. The refresh token it replaced is spent,
-    /// so it's kept for this run: renewed in place of the entry, and saved again by
-    /// the caller each poll.
-    public var unsaved: OAuthCredential?
+    /// so it's kept for this run: renewed in place of the entry, and saved again
+    /// each poll (`retryUnsaved`).
+    public internal(set) var unsaved: OAuthCredential?
 
     /// - Parameters:
     ///   - lockPath: the renewal lock (`WidgetConstants.renewalLock`). It also holds
@@ -60,6 +62,8 @@ public final class SignInRenewer {
         _ = await inFlight?.value
     }
 
+    // MARK: - Renewal
+
     /// Renews `credential`, or joins the renewal already in flight. Inside the
     /// 10-minute window the last attempt's verdict stands.
     public func renew(_ credential: OAuthCredential) async -> RenewalOutcome {
@@ -70,32 +74,20 @@ public final class SignInRenewer {
         }
         // Unstructured, so stopping the poll can't cancel it: once the request is
         // sent, only the reply holds a live refresh token.
-        let task = Task { await self.underLock(credential) }
+        let task = Task {
+            await self.withLock { lock in await self.renewUnderLock(credential, lock: lock) } ?? .notSent
+        }
         inFlight = task
         let outcome = await task.value
         inFlight = nil
         return outcome
     }
 
-    private func underLock(_ credential: OAuthCredential) async -> RenewalOutcome {
-        guard let lock = FileLock(path: lockPath) else {
-            log.error("renewal lock unavailable")
-            return .notSent
-        }
-        let took = await lock.lock(waitingUpTo: lockWait, interval: lockInterval,
-                                   giveUpIf: { @MainActor [weak self] in !(self?.maySend() ?? false) })
-        guard took else {
-            if maySend() {
-                log.error("renewal lock still held by another instance")
-            } else {
-                log.notice("renewal not sent: quitting or limits off")
-            }
-            return .notSent
-        }
-        defer { lock.unlock() }
+    private func renewUnderLock(_ credential: OAuthCredential, lock: FileLock) async -> RenewalOutcome {
+        let holdingUnsaved = credential == unsaved
         let entry = await readOwn()
-        switch RenewalPlan.afterLock(holding: credential, holdingUnsaved: credential == unsaved,
-                                     entry: entry, spent: lock.contents(), now: Date()) {
+        switch RenewalPlan.afterLock(holding: credential, holdingUnsaved: holdingUnsaved,
+                                     entry: entry, spent: marker(in: lock), now: Date()) {
         case .use(let stored):
             log.notice("renewal skipped: another instance already renewed")
             return .renewed(stored)
@@ -105,6 +97,10 @@ public final class SignInRenewer {
         case .spent:
             log.error("renewal skipped: refresh token already spent, its renewal not yet saved")
             return .notSent
+        case .lost:
+            // Nothing sent, so the 10-minute spacing isn't used up either.
+            log.error("renewal skipped: refresh token spent over 30 min ago and its renewal never saved")
+            return .rejected
         case .renew(let current):
             // Again, as the app may have started quitting while the entry was read.
             guard maySend() else {
@@ -112,13 +108,15 @@ public final class SignInRenewer {
                 return .notSent
             }
             let started = ContinuousClock.now
-            let outcome = await sendAndSave(current, lock: lock)
+            // An unsaved renewal's token was never in the entry, so no other instance
+            // can send it; the marker stays on the spent token the entry still holds.
+            let outcome = await sendAndSave(current, lock: lock, markSpent: !holdingUnsaved)
             spacing.record(outcome, startedAt: started)
             return outcome
         }
     }
 
-    private func sendAndSave(_ credential: OAuthCredential, lock: FileLock) async -> RenewalOutcome {
+    private func sendAndSave(_ credential: OAuthCredential, lock: FileLock, markSpent: Bool) async -> RenewalOutcome {
         let reply: (body: Data, status: Int)
         do {
             reply = try await send(TokenRefresh.makeRequest(refreshToken: credential.refreshToken))
@@ -137,7 +135,7 @@ public final class SignInRenewer {
         // the save: if the save fails the entry still holds it, and another instance
         // must not send it. Never marked before sending, as a request that didn't
         // reach the server would then block renewal for good.
-        if renewed.refreshToken != credential.refreshToken,
+        if markSpent, renewed.refreshToken != credential.refreshToken,
            !lock.replaceContents(with: Adoption.fingerprint(refreshToken: credential.refreshToken)) {
             log.error("spent-token marker not written")
         }
@@ -147,5 +145,86 @@ public final class SignInRenewer {
         let usable = TokenRefresh.usable(renewed, now: Date())
         if usable == .inconclusive { log.error("renewed sign-in is already due for renewal") }
         return usable
+    }
+
+    // MARK: - Other writes to the entry
+
+    /// Saves the unsaved renewal again, under the lock, so never alongside a
+    /// renewal's own save (which may have replaced it meanwhile). Returns the
+    /// sign-in to use this poll: the one pending now, saved or not. nil when none
+    /// is pending any more: read the entry.
+    public func retryUnsaved() async -> OAuthCredential? {
+        guard unsaved != nil else { return nil }
+        let retried: OAuthCredential?? = await withLock { _ in
+            guard let pending = self.unsaved else { return nil }
+            if await self.save(pending), self.unsaved == pending { self.unsaved = nil }
+            return pending
+        }
+        // Lock out of reach: use the pending sign-in, unsaved, this poll.
+        return retried ?? unsaved
+    }
+
+    public enum AdoptionSave: Equatable, Sendable {
+        /// Saved as the widget's own.
+        case saved
+        /// Not saved (save failed, entry unreadable, or the lock out of reach): use it this poll only.
+        case notSaved
+        /// The widget's sign-in changed since the caller looked (a renewal saved or
+        /// kept a newer one): nothing written, use this one instead.
+        case superseded(OAuthCredential)
+        /// Its refresh token is one a renewal here already spent: never adopted.
+        case spent
+    }
+
+    /// Saves Claude Code's sign-in as the widget's own, under the lock, but only in
+    /// place of `replacing`: the widget's sign-in the caller saw and is giving up on
+    /// (nil: it found none). Anything else there now is newer, so it wins.
+    public func adopt(_ theirs: OAuthCredential, replacing: OAuthCredential?) async -> AdoptionSave {
+        await withLock { lock in
+            let current: OAuthCredential?
+            if let unsaved = self.unsaved {
+                current = unsaved
+            } else {
+                switch await self.readOwn() {
+                case .found(let own): current = own
+                case .absent: current = nil
+                case .failed: return .notSaved
+                }
+            }
+            if let current, current.refreshToken != replacing?.refreshToken { return .superseded(current) }
+            if self.marker(in: lock)?.names(theirs) == true { return .spent }
+            guard await self.save(theirs) else { return .notSaved }
+            self.unsaved = nil   // it was `replacing`, now replaced
+            return .saved
+        } ?? .notSaved
+    }
+
+    // MARK: - Lock
+
+    /// Runs `body` holding the renewal lock; nil if it couldn't be taken.
+    private func withLock<T>(_ body: (FileLock) async -> T) async -> T? {
+        guard let lock = FileLock(path: lockPath) else {
+            log.error("renewal lock unavailable")
+            return nil
+        }
+        let took = await lock.lock(waitingUpTo: lockWait, interval: lockInterval,
+                                   giveUpIf: { @MainActor [weak self] in !(self?.maySend() ?? false) })
+        guard took else {
+            if maySend() {
+                log.error("renewal lock still held by another instance")
+            } else {
+                log.notice("renewal lock not taken: quitting or limits off")
+            }
+            return nil
+        }
+        defer { lock.unlock() }
+        return await body(lock)
+    }
+
+    /// The lock file's spent-token marker, if any. An unknown age reads as fresh.
+    private func marker(in lock: FileLock) -> SpentMarker? {
+        let fingerprint = lock.contents()
+        guard !fingerprint.isEmpty else { return nil }
+        return SpentMarker(fingerprint: fingerprint, markedAt: lock.modified() ?? Date())
     }
 }

@@ -70,10 +70,12 @@ public enum HooksConfigMerger {
 
     /// All entries present, and the PermissionRequest one able to carry an answer:
     /// synchronous, with a whole-second timeout longer than the app's decision wait
-    /// (`approvalDecisionTimeout`, 30 s), so the hook is never killed mid-wait. A
-    /// hand-edited 90 or 120 still counts; the merger writes 60. An async entry, or
-    /// a missing, too short or non-integer timeout, reads as not installed, so
-    /// Install (which replaces the widget's own entries) shows again.
+    /// (`approvalDecisionTimeout`, 30 s). That's the floor, not a safe margin: the
+    /// hook also spends up to 0.5 s on the ack, plus its own start-up, so 31 s
+    /// leaves under half a second (the merger writes 60). A hand-edited 90 or 120
+    /// still counts. An async entry, or a missing, too short or non-integer
+    /// timeout, reads as not installed, so Install (which replaces the widget's
+    /// own entries) shows again.
     public static func isInstalled(settings: [String: Any]) -> Bool {
         guard let hooks = settings["hooks"] as? [String: Any] else { return false }
         return events.allSatisfy { event, _ in

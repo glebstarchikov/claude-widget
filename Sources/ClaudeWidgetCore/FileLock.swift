@@ -55,6 +55,14 @@ public final class FileLock {
         return String(decoding: buffer[..<count], as: UTF8.self)
     }
 
+    /// When the lock file's contents were last written (its mtime); nil if unknown.
+    public func modified() -> Date? {
+        var info = stat()
+        guard fstat(fd, &info) == 0 else { return nil }
+        let time = info.st_mtimespec
+        return Date(timeIntervalSince1970: TimeInterval(time.tv_sec) + TimeInterval(time.tv_nsec) / 1e9)
+    }
+
     /// Replaces the lock file's contents. Written only while holding the lock, and
     /// never a secret: other processes of the same user can read it.
     @discardableResult

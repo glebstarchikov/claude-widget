@@ -178,10 +178,11 @@ final class UsageMonitor {
     /// The sign-in for this poll: one renewed earlier whose save failed (retrying
     /// the save), else the widget's own entry, else Claude Code's, adopted.
     private func signIn() async -> Result<OAuthCredential, LimitsFailure> {
-        if let pending = renewer.unsaved {
-            if await WidgetKeychain.save(pending) { renewer.unsaved = nil }
+        if renewer.unsaved != nil {
+            let pending = await renewer.retryUnsaved()
             if active { model.limitsSaveFailed = renewer.unsaved != nil }
-            return .success(pending)
+            // nil: a renewal saved or replaced it meanwhile, so the entry is current.
+            if let pending { return .success(pending) }
         }
         switch await WidgetKeychain.readOwn() {
         case .found(let own):
@@ -192,30 +193,38 @@ final class UsageMonitor {
             return .failure(.unavailable)
         case .absent:
             guard active else { return .failure(.unavailable) }
-            guard let adopted = await adoptClaudeCode(onlyIfNew: false) else { return .failure(.expired) }
+            guard let adopted = await adoptClaudeCode(onlyIfNew: false, replacing: nil) else { return .failure(.expired) }
             return .success(adopted)
         }
     }
 
-    /// Copies Claude Code's sign-in into the widget's own entry and remembers a
-    /// hash of its refresh token (never the token). With `onlyIfNew`, only a
-    /// sign-in other than the one adopted last time (Gleb ran /login again).
-    private func adoptClaudeCode(onlyIfNew: Bool) async -> OAuthCredential? {
+    /// Copies Claude Code's sign-in into the widget's own entry in place of
+    /// `replacing` (SignInRenewer.adopt) and remembers a hash of its refresh token
+    /// (never the token). With `onlyIfNew`, only a sign-in other than the one
+    /// adopted last time (Gleb ran /login again).
+    private func adoptClaudeCode(onlyIfNew: Bool, replacing: OAuthCredential?) async -> OAuthCredential? {
         guard let theirs = await WidgetKeychain.readClaudeCode() else { return nil }
         let hash = Adoption.fingerprint(refreshToken: theirs.refreshToken)
         guard Adoption.shouldAdopt(fingerprint: hash, lastAdopted: UserDefaults.standard.string(forKey: Self.adoptedHashKey),
                                    onlyIfNew: onlyIfNew) else { return nil }
         guard active else { return nil }
-        if await WidgetKeychain.save(theirs) {
+        switch await renewer.adopt(theirs, replacing: replacing) {
+        case .saved:
             UserDefaults.standard.set(hash, forKey: Self.adoptedHashKey)
-            renewer.unsaved = nil   // superseded by the new sign-in
             model.limitsSaveFailed = false
             Logger.limits.notice("adopted Claude Code's sign-in")
-        } else {
+            return theirs
+        case .notSaved:
             // It's still valid in Claude Code's entry: use it this poll, adopt again next poll.
             Logger.limits.error("adoption not saved; using Claude Code's sign-in for this poll")
+            return theirs
+        case .superseded(let newer):
+            Logger.limits.notice("adoption skipped: a renewal saved a newer sign-in meanwhile")
+            return newer
+        case .spent:
+            Logger.limits.error("adoption skipped: a renewal here already spent that sign-in")
+            return nil
         }
-        return theirs
     }
 
     /// Renews `credential`, or failing that adopts a newer Claude Code sign-in.
@@ -227,7 +236,7 @@ final class UsageMonitor {
         let result = await renew(credential)
         if case .renewed(let renewed) = result { return .success(renewed) }
         guard active else { return .failure(.unavailable) }
-        if let adopted = await adoptClaudeCode(onlyIfNew: true) { return .success(adopted) }
+        if let adopted = await adoptClaudeCode(onlyIfNew: true, replacing: credential) { return .success(adopted) }
         return .failure(result.failure(afterFeedRefusal: afterFeedRefusal))
     }
 

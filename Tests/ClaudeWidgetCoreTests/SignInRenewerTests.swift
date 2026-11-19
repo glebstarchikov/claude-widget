@@ -16,6 +16,8 @@ final class SignInRenewerTests: XCTestCase {
         var replies: [Reply] = []
         var maySend = true
         var saveWorks = true
+        /// Per-save results, used up in order before `saveWorks` applies.
+        var saveResults: [Bool] = []
         var sendDelay: Duration?
         /// Refresh tokens sent, in order.
         var sent: [String] = []
@@ -47,8 +49,9 @@ final class SignInRenewerTests: XCTestCase {
             save: { [unowned self] credential in
                 self.duringSave?()
                 self.saved.append(credential)
-                if self.saveWorks { self.entry = .found(credential) }
-                return self.saveWorks
+                let works = self.saveResults.isEmpty ? self.saveWorks : self.saveResults.removeFirst()
+                if works { self.entry = .found(credential) }
+                return works
             })
     }
 
@@ -70,6 +73,23 @@ final class SignInRenewerTests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("cwr-\(UUID().uuidString.prefix(8))").path
         addTeardownBlock { try? FileManager.default.removeItem(atPath: dir) }
         return dir + "/run/renew.lock"
+    }
+
+    /// Makes the lock file's marker look written `ago` seconds back.
+    private func backdateMarker(at path: String, by ago: TimeInterval) throws {
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-ago)], ofItemAtPath: path)
+    }
+
+    /// Instance A renews `token` and gets a rotated one, but its save fails: the
+    /// entry still holds `token`, now marked spent. Returns A.
+    private func renewedButUnsaved(_ token: OAuthCredential, at path: String, into next: String) async -> Instance {
+        let a = Instance(lockPath: path)
+        a.entry = .found(token)
+        a.saveWorks = false
+        a.replies = [tokens("AAA-\(next)", "RRR-\(next)")]
+        _ = await a.renewer.renew(token)
+        XCTAssertEqual(a.renewer.unsaved?.refreshToken, "RRR-\(next)")
+        return a
     }
 
     /// The spent-token marker, as the next holder of the lock reads it.
@@ -355,5 +375,229 @@ final class SignInRenewerTests: XCTestCase {
         XCTAssertEqual(outcome, .inconclusive)
         XCTAssertEqual(a.saved.map(\.refreshToken), ["RRR-r2"], "the live refresh token is kept")
         XCTAssertEqual(try marker(at: path), Adoption.fingerprint(refreshToken: "RRR-r1"))
+    }
+
+    // MARK: - A marker left behind
+
+    /// A renewed R1 → R2, marked R1, couldn't save R2, then quit or crashed: R2 is
+    /// gone and the entry's R1 is dead. Once the marker is old that reads "expired",
+    /// so a fresh /login can be adopted, without sending R1.
+    func testAnOldMarkerReadsAsExpiredWithoutSending() async throws {
+        let path = newLockPath()
+        let r1 = signIn("r1")
+        _ = await renewedButUnsaved(r1, at: path, into: "r2")
+        try backdateMarker(at: path, by: SpentMarker.lifetime + 60)
+
+        let relaunched = Instance(lockPath: path)
+        relaunched.entry = .found(r1)
+        let outcome = await relaunched.renewer.renew(r1)
+        XCTAssertEqual(outcome, .rejected)
+        XCTAssertEqual(outcome.failure(afterFeedRefusal: false), .expired)
+        XCTAssertEqual(relaunched.sent, [])
+
+        // Nothing was sent, so the 10-minute spacing is untouched: a /login adopted
+        // next renews at once.
+        let login = signIn("login")
+        relaunched.entry = .found(login)
+        relaunched.replies = [tokens("AAA-l2", "RRR-l2")]
+        guard case .renewed = await relaunched.renewer.renew(login) else { return XCTFail() }
+        XCTAssertEqual(relaunched.sent, ["RRR-login"])
+    }
+
+    func testAYoungMarkerStillOnlyHoldsBack() async throws {
+        let path = newLockPath()
+        let r1 = signIn("r1")
+        _ = await renewedButUnsaved(r1, at: path, into: "r2")
+        try backdateMarker(at: path, by: SpentMarker.lifetime - 120)
+
+        let b = Instance(lockPath: path)
+        b.entry = .found(r1)
+        let outcome = await b.renewer.renew(r1)
+        XCTAssertEqual(outcome, .notSent)
+        XCTAssertEqual(outcome.failure(afterFeedRefusal: true), .unavailable, "not expired while A may still save")
+        XCTAssertEqual(b.sent, [])
+    }
+
+    func testAnOldMarkerOnAnotherTokenDoesNotBlock() async throws {
+        let path = newLockPath()
+        _ = await renewedButUnsaved(signIn("r1"), at: path, into: "r2")
+        try backdateMarker(at: path, by: 6 * 3600)
+
+        let c = Instance(lockPath: path)
+        let r9 = signIn("r9")
+        c.entry = .found(r9)
+        c.replies = [tokens("AAA-r10", "RRR-r10")]
+        guard case .renewed = await c.renewer.renew(r9) else { return XCTFail() }
+        XCTAssertEqual(c.sent, ["RRR-r9"])
+    }
+
+    // MARK: - Renewing an unsaved sign-in keeps the marker
+
+    func testRenewingAnUnsavedSignInKeepsTheEntrysTokenMarked() async throws {
+        let path = newLockPath()
+        let r1 = signIn("r1")
+        let a = await renewedButUnsaved(r1, at: path, into: "r2")
+        // A, a poll later (past the spacing window), renews its unsaved R2; that
+        // save fails too.
+        let later = Instance(lockPath: path)
+        later.renewer.unsaved = a.renewer.unsaved
+        later.entry = .found(r1)
+        later.saveWorks = false
+        later.replies = [tokens("AAA-r3", "RRR-r3")]
+        _ = await later.renewer.renew(try XCTUnwrap(a.renewer.unsaved))
+        XCTAssertEqual(later.sent, ["RRR-r2"])
+        XCTAssertEqual(try marker(at: path), Adoption.fingerprint(refreshToken: "RRR-r1"),
+                       "R2 was never in the entry; R1 is what must stay marked")
+
+        let b = Instance(lockPath: path)
+        b.entry = .found(r1)
+        let outcome = await b.renewer.renew(r1)
+        XCTAssertEqual(outcome, .notSent)
+        XCTAssertEqual(b.sent, [])
+    }
+
+    // MARK: - Retrying a failed save, alongside a renewal
+
+    /// P1's retry-save of U failed, so P1 renewed U and that renewal T is still in
+    /// flight when P2 (a replaced poll loop) retries the save. T's save works.
+    func testARetrySaveWaitsForTheRenewalAndNeverOverwritesIt() async throws {
+        let a = Instance(lockPath: newLockPath())
+        let u = signIn("u")
+        a.renewer.unsaved = u
+        a.entry = .found(signIn("r1"))
+        a.replies = [tokens("AAA-r3", "RRR-r3")]
+        a.sendDelay = .milliseconds(200)
+        let renewal = Task { await a.renewer.renew(u) }
+        try await Task.sleep(for: .milliseconds(50))
+        let pending = await a.renewer.retryUnsaved()
+        _ = await renewal.value
+        XCTAssertNil(pending, "nothing pending: the entry is current")
+        XCTAssertEqual(a.saved.map(\.refreshToken), ["RRR-r3"], "U is never saved over R3")
+        guard case .found(let stored) = a.entry else { return XCTFail() }
+        XCTAssertEqual(stored.refreshToken, "RRR-r3")
+        XCTAssertNil(a.renewer.unsaved)
+    }
+
+    /// The other ordering: T's own save fails, so R3 is what's pending when P2 retries.
+    func testARetrySaveAfterAFailedRenewalSaveSavesTheNewerSignIn() async throws {
+        let a = Instance(lockPath: newLockPath())
+        let u = signIn("u")
+        a.renewer.unsaved = u
+        a.entry = .found(signIn("r1"))
+        a.replies = [tokens("AAA-r3", "RRR-r3")]
+        a.sendDelay = .milliseconds(200)
+        a.saveResults = [false]
+        let renewal = Task { await a.renewer.renew(u) }
+        try await Task.sleep(for: .milliseconds(50))
+        let pending = await a.renewer.retryUnsaved()
+        _ = await renewal.value
+        XCTAssertEqual(pending?.refreshToken, "RRR-r3")
+        XCTAssertEqual(a.saved.map(\.refreshToken), ["RRR-r3", "RRR-r3"], "U is never saved; R3 is retried")
+        XCTAssertNil(a.renewer.unsaved)
+    }
+
+    func testARetrySaveThatFailsKeepsItPending() async {
+        let a = Instance(lockPath: newLockPath())
+        let u = signIn("u")
+        a.renewer.unsaved = u
+        a.saveWorks = false
+        let pending = await a.renewer.retryUnsaved()
+        XCTAssertEqual(pending, u, "used this poll")
+        XCTAssertEqual(a.renewer.unsaved, u)
+        let none = Instance(lockPath: newLockPath())
+        let nothing = await none.renewer.retryUnsaved()
+        XCTAssertNil(nothing)
+        XCTAssertEqual(none.saved, [])
+    }
+
+    // MARK: - Adopting Claude Code's sign-in, alongside a renewal
+
+    /// The poll used Claude Code's sign-in without saving it (entry absent) and is
+    /// renewing it; P2 found the entry absent and adopts the same sign-in, which
+    /// the renewal has just spent.
+    func testAnAdoptionWaitsForTheRenewalAndNeverOverwritesIt() async throws {
+        let a = Instance(lockPath: newLockPath())
+        let theirs = signIn("cc")
+        a.entry = .absent
+        a.replies = [tokens("AAA-r3", "RRR-r3")]
+        a.sendDelay = .milliseconds(200)
+        let renewal = Task { await a.renewer.renew(theirs) }
+        try await Task.sleep(for: .milliseconds(50))
+        let adoption = await a.renewer.adopt(theirs, replacing: nil)
+        _ = await renewal.value
+        guard case .found(let r3) = a.entry else { return XCTFail() }
+        XCTAssertEqual(r3.refreshToken, "RRR-r3")
+        XCTAssertEqual(adoption, .superseded(r3))
+        XCTAssertEqual(a.saved.map(\.refreshToken), ["RRR-r3"], "the spent sign-in is never saved over R3")
+    }
+
+    func testAnAdoptionAfterAFailedRenewalSaveYieldsTheUnsavedSignIn() async throws {
+        let a = Instance(lockPath: newLockPath())
+        let theirs = signIn("cc")
+        a.entry = .absent
+        a.replies = [tokens("AAA-r3", "RRR-r3")]
+        a.sendDelay = .milliseconds(200)
+        a.saveResults = [false]
+        let renewal = Task { await a.renewer.renew(theirs) }
+        try await Task.sleep(for: .milliseconds(50))
+        let adoption = await a.renewer.adopt(theirs, replacing: nil)
+        _ = await renewal.value
+        let r3 = try XCTUnwrap(a.renewer.unsaved)
+        XCTAssertEqual(r3.refreshToken, "RRR-r3")
+        XCTAssertEqual(adoption, .superseded(r3))
+        XCTAssertEqual(a.saved.map(\.refreshToken), ["RRR-r3"])
+        XCTAssertEqual(a.entry, .absent)
+    }
+
+    func testASpentSignInIsNeverAdopted() async throws {
+        let path = newLockPath()
+        let theirs = signIn("cc")
+        _ = await renewedButUnsaved(theirs, at: path, into: "r2")
+        let relaunched = Instance(lockPath: path)
+        relaunched.entry = .absent
+        let adoption = await relaunched.renewer.adopt(theirs, replacing: nil)
+        XCTAssertEqual(adoption, .spent)
+        XCTAssertEqual(relaunched.saved, [])
+    }
+
+    func testAnAdoptionReplacesOnlyTheSignInTheCallerSaw() async {
+        let r1 = signIn("r1")
+        let login = signIn("login", expiresIn: 8 * 3600)
+
+        let a = Instance(lockPath: newLockPath())
+        a.entry = .found(r1)
+        let saved = await a.renewer.adopt(login, replacing: r1)
+        XCTAssertEqual(saved, .saved)
+        XCTAssertEqual(a.entry, .found(login))
+
+        let b = Instance(lockPath: newLockPath())
+        let saved2 = await b.renewer.adopt(login, replacing: nil)
+        XCTAssertEqual(saved2, .saved, "nothing there to lose")
+
+        let c = Instance(lockPath: newLockPath())
+        c.renewer.unsaved = r1
+        c.entry = .found(signIn("replaced"))
+        let saved3 = await c.renewer.adopt(login, replacing: r1)
+        XCTAssertEqual(saved3, .saved)
+        XCTAssertNil(c.renewer.unsaved, "the unsaved sign-in it replaced is dropped")
+
+        // Something else is there now: it's newer than what the caller saw.
+        let d = Instance(lockPath: newLockPath())
+        let r9 = signIn("r9")
+        d.entry = .found(r9)
+        let superseded = await d.renewer.adopt(login, replacing: r1)
+        XCTAssertEqual(superseded, .superseded(r9))
+        XCTAssertEqual(d.saved, [])
+
+        let e = Instance(lockPath: newLockPath())
+        e.entry = .failed(51)
+        let unreadable = await e.renewer.adopt(login, replacing: nil)
+        XCTAssertEqual(unreadable, .notSaved)
+        XCTAssertEqual(e.saved, [])
+
+        let f = Instance(lockPath: newLockPath())
+        f.saveWorks = false
+        let failed = await f.renewer.adopt(login, replacing: nil)
+        XCTAssertEqual(failed, .notSaved)
     }
 }

@@ -27,7 +27,9 @@ public enum LimitsFailure: Error, Equatable, Sendable {
 public enum RenewalOutcome: Equatable, Sendable {
     /// A sign-in to use: issued by the server, or already saved by another instance.
     case renewed(OAuthCredential)
-    /// The server refused the refresh token (400, 401 or 403).
+    /// The refresh token is dead: the server refused it (400, 401 or 403), or it
+    /// was spent over `SpentMarker.lifetime` ago by a renewal that was never saved
+    /// (nothing sent then).
     case rejected
     /// No verdict on the sign-in: the request may have reached the server, but
     /// the answer says nothing about the token (timeout, 429, 5xx, another status,
@@ -174,21 +176,22 @@ public enum RenewalPlan: Equatable, Sendable {
     /// it but couldn't save the result, so the entry still holds it. Send nothing;
     /// no verdict (that instance keeps retrying its save).
     case spent
+    /// As `spent`, but marked over `SpentMarker.lifetime` ago: the instance that
+    /// held the renewal has quit or crashed without saving it, so the sign-in is
+    /// lost. Send nothing; it reads as expired (run /login).
+    case lost
 
     /// - Parameters:
     ///   - holding: the sign-in this poll was going to renew.
     ///   - holdingUnsaved: `holding` is a renewal whose save failed, so the entry
     ///     is older than it by construction and only `holding` is live.
     ///   - entry: the widget's entry, read after taking the lock.
-    ///   - spent: the lock file's marker, the fingerprint (`Adoption.fingerprint`)
-    ///     of the last refresh token a renewal spent; nil if none.
+    ///   - spent: the lock file's spent-token marker; nil if none.
     public static func afterLock(holding: OAuthCredential, holdingUnsaved: Bool, entry: StoredSignIn,
-                                 spent: String?, now: Date) -> RenewalPlan {
+                                 spent: SpentMarker?, now: Date) -> RenewalPlan {
         let plan = beforeMarker(holding: holding, holdingUnsaved: holdingUnsaved, entry: entry, now: now)
-        if case .renew(let c) = plan, let spent, Adoption.fingerprint(refreshToken: c.refreshToken) == spent {
-            return .spent
-        }
-        return plan
+        guard case .renew(let c) = plan, let spent, spent.names(c) else { return plan }
+        return now.timeIntervalSince(spent.markedAt) >= SpentMarker.lifetime ? .lost : .spent
     }
 
     private static func beforeMarker(holding: OAuthCredential, holdingUnsaved: Bool,
@@ -201,6 +204,30 @@ public enum RenewalPlan: Equatable, Sendable {
             guard stored.refreshToken != holding.refreshToken else { return .renew(holding) }
             return CredentialParser.needsRenewal(stored, now: now) ? .renew(stored) : .use(stored)
         }
+    }
+}
+
+/// The lock file's record of the last refresh token a renewal spent (the server
+/// rotated it): its fingerprint, never the token, and when it was written.
+public struct SpentMarker: Equatable, Sendable {
+    /// How long a marker only holds renewals back. The instance whose save failed
+    /// retries it every poll (at most 30 min apart), so a marker older than this
+    /// means that instance is gone and the sign-in in the entry is dead. Wall-clock
+    /// time (the file's mtime): a clock change only moves when the label turns
+    /// from "unavailable" to "expired"; nothing is sent either way.
+    public static let lifetime: TimeInterval = 1800
+
+    public var fingerprint: String
+    public var markedAt: Date
+
+    public init(fingerprint: String, markedAt: Date) {
+        self.fingerprint = fingerprint
+        self.markedAt = markedAt
+    }
+
+    /// Whether this marks `credential`'s refresh token as spent.
+    public func names(_ credential: OAuthCredential) -> Bool {
+        fingerprint == Adoption.fingerprint(refreshToken: credential.refreshToken)
     }
 }
 
