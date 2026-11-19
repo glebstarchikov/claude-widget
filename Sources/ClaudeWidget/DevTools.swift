@@ -45,8 +45,10 @@ enum DevTools {
         for theme in [ThemeID.claude, .system, .indigo] {
             let pair = ThemePalette.pair(for: theme, custom: custom)
             for (barName, bar, dark) in bars {
-                let color = ns(dark ? pair.dark : pair.light)
+                let themed = ns(dark ? pair.dark : pair.light)
+                let faint = dark ? Theme.faintDark : Theme.faintLight
                 for (name, pose, opacity, hat, badge) in states {
+                    let color = pose == .asleep ? faint : themed
                     for size in [18, 72] as [CGFloat] {
                         let critter = CritterRenderer.image(pose: pose, color: color, opacity: opacity,
                                                             pointSize: size, hat: hat, badge: badge)

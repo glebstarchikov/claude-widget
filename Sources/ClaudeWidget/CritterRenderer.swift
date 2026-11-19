@@ -33,7 +33,7 @@ enum CritterRenderer {
 
     private static func drawHat(in context: CGContext) {
         let red = NSColor(srgbRed: 0xD9 / 255, green: 0x3A / 255, blue: 0x3A / 255, alpha: 1).cgColor
-        let hairline = NSColor(white: 0, alpha: 0.18).cgColor
+        let hairline = NSColor(white: 0, alpha: 0.35).cgColor
         let brim = CGPath(roundedRect: CritterGeometry.hatBrim, cornerWidth: 0.9, cornerHeight: 0.9, transform: nil)
         let parts: [(CGPath, CGColor)] = [
             (CritterGeometry.hatCone(), red),
@@ -46,7 +46,7 @@ enum CritterRenderer {
             context.fillPath()
             context.addPath(path)
             context.setStrokeColor(hairline)
-            context.setLineWidth(0.4)
+            context.setLineWidth(0.6)
             context.strokePath()
         }
     }
