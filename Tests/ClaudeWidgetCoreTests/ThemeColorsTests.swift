@@ -44,6 +44,10 @@ final class ThemeColorsTests: XCTestCase {
         XCTAssertEqual(ThemePalette.onAccent(RGB(hex: "#4B46F5")!), ThemePalette.white)
         XCTAssertEqual(ThemePalette.onAccent(RGB(hex: "#6FAE2C")!), ThemePalette.darkText)
     }
+    func testOnAccentForMacOSAccentColors() {
+        XCTAssertEqual(ThemePalette.onAccent(RGB(hex: "#FFCC00")!), ThemePalette.darkText)  // yellow
+        XCTAssertEqual(ThemePalette.onAccent(RGB(hex: "#953D96")!), ThemePalette.white)     // purple (#007AFF blue actually favors dark text by contrast)
+    }
     func testNewYearWindowBoundaries() {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "Europe/Amsterdam")!
         func d(_ y: Int, _ m: Int, _ day: Int, _ h: Int = 12) -> Date {

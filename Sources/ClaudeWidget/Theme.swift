@@ -57,7 +57,12 @@ enum Theme {
     /// Label color on an `accent(dark:)` fill: white or near-black, whichever reads better.
     static func onAccent(dark: Bool) -> NSColor {
         let store = ThemeStore.shared
-        if store.id == .system { return NSColor.white }
+        if store.id == .system {
+            // The macOS accent varies (yellow is light), so pick by contrast like the other themes.
+            guard let c = NSColor.controlAccentColor.usingColorSpace(.sRGB) else { return NSColor.white }
+            let fill = RGB(r: Double(c.redComponent), g: Double(c.greenComponent), b: Double(c.blueComponent))
+            return ns(ThemePalette.onAccent(fill))
+        }
         return ns(ThemePalette.onAccent(dark ? store.pair.dark : store.pair.light))
     }
 
