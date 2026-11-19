@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var approvals: ApprovalCoordinator!
     private var approvalsToggle: AnyCancellable?
     private var proactiveToggle: AnyCancellable?
+    private var themeObservation: AnyCancellable?
+    private var dayObserver: NSObjectProtocol?
     /// SIGTERM (`pkill`, `scripts/bundle.sh --install`) quits like the menu's Quit.
     private var sigterm: DispatchSourceSignal?
     /// Quit is waiting for a sign-in renewal (`applicationShouldTerminate`).
@@ -42,10 +44,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "answerFromNotchEnabled": true,
             "limitsEnabled": true,
             "pushEnabled": false,
+            "theme": "claude",
+            "themeCustomColor": "#2BB3C0",
+            "newYearHat": true,
         ])
 
         model = AppModel()
         statusController = StatusItemController()
+        // objectWillChange fires before the change; hopping to the next main-queue turn
+        // makes refresh() read the new palette.
+        themeObservation = ThemeStore.shared.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.statusController.refresh() }
+        dayObserver = NotificationCenter.default.addObserver(
+            forName: .NSCalendarDayChanged, object: nil, queue: .main) { _ in
+            Task { @MainActor in ThemeStore.shared.dayChanged() }
+        }
         hub = HubController(model: hubModel, appModel: model)
         hub.start()
 

@@ -5,6 +5,8 @@ import ClaudeWidgetCore
 /// `dmg.sh`), never at runtime. Kept out of `main.swift` so the app's entry
 /// point stays just the runtime wiring.
 enum DevTools {
+    /// The DMG arrow stroke: the original indigo, independent of the chosen theme.
+    private static let arrowStroke = NSColor(hex: 0x4B46F5)
     /// Handles a dev-tools flag if present. Returns true when it did (caller exits).
     static func run(_ arguments: [String]) -> Bool {
         if arguments.contains("--dump-poses") {
@@ -102,7 +104,7 @@ enum DevTools {
         NSRect(x: 0, y: 0, width: w, height: h).fill()
 
         // Icons sit at point (150,200) and (450,200); the arrow spans between them.
-        Theme.accentLight.setStroke()
+        Self.arrowStroke.setStroke()
         let shaft = NSBezierPath()
         shaft.lineWidth = 7
         shaft.lineCapStyle = .round

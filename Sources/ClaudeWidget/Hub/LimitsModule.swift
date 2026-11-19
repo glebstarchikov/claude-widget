@@ -106,7 +106,7 @@ struct LimitsModule: View {
     }
 }
 
-/// One usage window: a ring filled to its percent (indigo, system red from 90 %),
+/// One usage window: a ring filled to its percent (theme accent, system red from 90 %),
 /// the percent inside, the window's label under it. The active limit's label is emphasized.
 private struct UsageRing: View {
     static let diameter: CGFloat = 36
@@ -120,7 +120,7 @@ private struct UsageRing: View {
 
     private var color: Color {
         if window.percent >= 90 { return .red }
-        return Color(nsColor: colorScheme == .dark ? Theme.accentDark : Theme.accentLight)
+        return Color(nsColor: Theme.accent(dark: colorScheme == .dark))
     }
 
     var body: some View {

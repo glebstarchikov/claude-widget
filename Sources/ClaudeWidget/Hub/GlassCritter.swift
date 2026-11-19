@@ -11,33 +11,38 @@ struct GlassCritter: View {
     var size: CGFloat = 18
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject private var themeStore = ThemeStore.shared
 
     var body: some View {
+        let hat = themeStore.hatOn
+        let badge = state == .needsYou
         let (color, opacity) = Theme.critterColor(state: state, darkAppearance: colorScheme == .dark)
         Group {
             if reduceMotion {
-                image(state == .asleep ? .asleep : .idle, color, opacity)
+                image(state == .asleep ? .asleep : .idle, color, opacity, hat, badge)
             } else {
                 switch state {
                 case .working:
                     TimelineView(.periodic(from: .now, by: WidgetConstants.walkFrameDuration)) { context in
                         let step = Int(context.date.timeIntervalSinceReferenceDate / WidgetConstants.walkFrameDuration)
-                        image(step.isMultiple(of: 2) ? .walkA : .walkB, color, opacity)
+                        image(step.isMultiple(of: 2) ? .walkA : .walkB, color, opacity, hat, badge)
                     }
                 case .needsYou:
-                    PulseCritter(color: color, opacity: opacity, size: size)
+                    PulseCritter(color: color, opacity: opacity, size: size, hat: hat, badge: badge)
                 case .ready, .waiting:
-                    BlinkCritter(color: color, opacity: opacity, size: size)
+                    BlinkCritter(color: color, opacity: opacity, size: size, hat: hat, badge: badge)
                 case .asleep:
-                    image(.asleep, color, opacity)
+                    image(.asleep, color, opacity, hat, badge)
                 }
             }
         }
         .frame(width: size, height: size)
     }
 
-    private func image(_ pose: CritterPose, _ color: NSColor, _ opacity: CGFloat) -> Image {
-        Image(nsImage: CritterRenderer.image(pose: pose, color: color, opacity: opacity, pointSize: size))
+    private func image(_ pose: CritterPose, _ color: NSColor, _ opacity: CGFloat,
+                       _ hat: Bool, _ badge: Bool) -> Image {
+        Image(nsImage: CritterRenderer.image(pose: pose, color: color, opacity: opacity,
+                                             pointSize: size, hat: hat, badge: badge))
     }
 }
 
@@ -58,10 +63,13 @@ private struct PulseCritter: View {
     let color: NSColor
     let opacity: CGFloat
     let size: CGFloat
+    let hat: Bool
+    let badge: Bool
     @State private var dim = false
 
     var body: some View {
-        Image(nsImage: CritterRenderer.image(pose: .idle, color: color, opacity: opacity, pointSize: size))
+        Image(nsImage: CritterRenderer.image(pose: .idle, color: color, opacity: opacity,
+                                             pointSize: size, hat: hat, badge: badge))
             .opacity(dim ? 0.55 : 1.0)
             .animation(.easeInOut(duration: WidgetConstants.pulsePeriod / 2).repeatForever(autoreverses: true),
                        value: dim)
@@ -75,10 +83,13 @@ private struct BlinkCritter: View {
     let color: NSColor
     let opacity: CGFloat
     let size: CGFloat
+    let hat: Bool
+    let badge: Bool
     @State private var pose: CritterPose = .idle
 
     var body: some View {
-        Image(nsImage: CritterRenderer.image(pose: pose, color: color, opacity: opacity, pointSize: size))
+        Image(nsImage: CritterRenderer.image(pose: pose, color: color, opacity: opacity,
+                                             pointSize: size, hat: hat, badge: badge))
             .task {
                 while !Task.isCancelled {
                     let gap = Double.random(in: WidgetConstants.blinkIntervalRange)

@@ -37,6 +37,7 @@ struct HubView: View {
     /// Reports the pill's size (the one with a request is bigger than the plain one).
     let onPillSizeChange: (CGSize) -> Void
 
+    @ObservedObject private var themeStore = ThemeStore.shared
     @State private var scrollOffset: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -75,6 +76,18 @@ struct HubView: View {
                                                                     style: .continuous))
                 }
                 .frame(width: HubLayout.width)
+                .overlay(alignment: .topTrailing) {
+                    // Static, so Reduce Motion needs nothing extra.
+                    if themeStore.hatOn {
+                        HStack(spacing: 3) {
+                            Image(systemName: "snowflake").font(.system(size: 9))
+                            Image(systemName: "snowflake").font(.system(size: 6)).offset(y: 5)
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 6).padding(.trailing, 10)
+                        .allowsHitTesting(false)
+                    }
+                }
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { onHubHeightChange($0) }
                 .transition(transition)
             } else if case .needsYou? = model.pill, let first = model.pending.first {
