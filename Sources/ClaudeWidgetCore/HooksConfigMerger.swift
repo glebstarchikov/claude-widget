@@ -68,9 +68,12 @@ public enum HooksConfigMerger {
         return result
     }
 
-    /// All entries present, and the PermissionRequest one current: synchronous with
-    /// the 60 s timeout. An older or edited one reads as not installed, so Install
-    /// (which replaces the widget's own entries) shows again.
+    /// All entries present, and the PermissionRequest one able to carry an answer:
+    /// synchronous, with a whole-second timeout longer than the app's decision wait
+    /// (`approvalDecisionTimeout`, 30 s), so the hook is never killed mid-wait. A
+    /// hand-edited 90 or 120 still counts; the merger writes 60. An async entry, or
+    /// a missing, too short or non-integer timeout, reads as not installed, so
+    /// Install (which replaces the widget's own entries) shows again.
     public static func isInstalled(settings: [String: Any]) -> Bool {
         guard let hooks = settings["hooks"] as? [String: Any] else { return false }
         return events.allSatisfy { event, _ in
@@ -80,8 +83,15 @@ public enum HooksConfigMerger {
                 let ours = (entry["hooks"] as? [[String: Any]] ?? []).filter {
                     ($0["command"] as? String)?.contains(markerSubstring) == true
                 }
-                return ours.contains { $0["async"] as? Bool != true && $0["timeout"] as? Int == synchronousTimeout }
+                return ours.contains { $0["async"] as? Bool != true && outlastsTheDecisionWait($0["timeout"]) }
             }
         }
+    }
+
+    /// A whole number of seconds longer than the app's decision wait. (A parsed
+    /// JSON boolean reads as 0 or 1, so it never passes.)
+    static func outlastsTheDecisionWait(_ timeout: Any?) -> Bool {
+        guard let seconds = timeout as? Int else { return false }
+        return Double(seconds) > WidgetConstants.approvalDecisionTimeout
     }
 }

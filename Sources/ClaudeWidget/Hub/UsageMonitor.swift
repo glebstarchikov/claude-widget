@@ -132,14 +132,14 @@ final class UsageMonitor {
         case .failure(let end): return finish(end)
         }
         if CredentialParser.needsRenewal(credential, now: Date()) {
-            switch await renewOrReadopt(credential) {
+            switch await renewOrReadopt(credential, afterFeedRefusal: false) {
             case .success(let c): credential = c
             case .failure(let end): return finish(end)
             }
         }
         var reply = await readUsage(with: credential)
         if case .unauthorized = reply {
-            switch await renewOrReadopt(credential) {
+            switch await renewOrReadopt(credential, afterFeedRefusal: true) {
             case .success(let renewed): reply = await readUsage(with: renewed)
             case .failure(let end): return finish(end)
             }
@@ -161,17 +161,16 @@ final class UsageMonitor {
     }
 
     private func finish(_ end: LimitsFailure) -> UsageFetchOutcome {
-        switch end {
-        case .expired:
-            if active {
+        if active {
+            switch end {
+            case .expired:
                 Logger.limits.notice("sign-in expired")
                 model.limits = .expired(last: lastGood)
+            case .unavailable:
+                model.limits = .unavailable(last: lastGood)
             }
-            return .unauthorized
-        case .unavailable:
-            if active { model.limits = .unavailable(last: lastGood) }
-            return .failure
         }
+        return end.fetchOutcome
     }
 
     // MARK: - Sign-in
@@ -220,14 +219,16 @@ final class UsageMonitor {
     }
 
     /// Renews `credential`, or failing that adopts a newer Claude Code sign-in.
-    /// Only a renewal the server refused means the sign-in expired; any other
+    /// Expired only when the server refused the renewal, or when the feed refused a
+    /// sign-in renewed in the last 10 minutes (RenewalOutcome.failure); any other
     /// failure leaves the limits unavailable (retried with backoff).
-    private func renewOrReadopt(_ credential: OAuthCredential) async -> Result<OAuthCredential, LimitsFailure> {
+    private func renewOrReadopt(_ credential: OAuthCredential,
+                                afterFeedRefusal: Bool) async -> Result<OAuthCredential, LimitsFailure> {
         let result = await renew(credential)
         if case .renewed(let renewed) = result { return .success(renewed) }
         guard active else { return .failure(.unavailable) }
         if let adopted = await adoptClaudeCode(onlyIfNew: true) { return .success(adopted) }
-        return .failure(result.failure)
+        return .failure(result.failure(afterFeedRefusal: afterFeedRefusal))
     }
 
     private func renew(_ credential: OAuthCredential) async -> RenewalOutcome {
@@ -256,10 +257,8 @@ final class UsageMonitor {
                 return .failed
             }
             return .ok(usage)
-        case 401, 403:
-            return .unauthorized
         default:
-            return .failed
+            return UsageRequest.refused(status: reply.status) ? .unauthorized : .failed
         }
     }
 

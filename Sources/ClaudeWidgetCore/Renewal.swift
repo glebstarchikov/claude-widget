@@ -17,6 +17,10 @@ public enum LimitsFailure: Error, Equatable, Sendable {
     /// "Limits unavailable": nothing says the sign-in is bad (no network, rate
     /// limited, a server error, an unexpected answer). Retried with backoff.
     case unavailable
+
+    /// How the next poll is scheduled (UsagePollPolicy): an expired sign-in waits
+    /// 30 minutes, anything else backs off from 60 s.
+    public var fetchOutcome: UsageFetchOutcome { self == .expired ? .unauthorized : .failure }
 }
 
 /// How one renewal attempt ended.
@@ -33,10 +37,24 @@ public enum RenewalOutcome: Equatable, Sendable {
     /// the renewal lock or the widget's entry out of reach, quitting or Limits off,
     /// or a refresh token already spent. Doesn't count against the renewal spacing.
     case notSent
+    /// Not sent: this instance renewed the sign-in less than 10 minutes ago, and
+    /// that renewal worked (RenewalSpacing).
+    case recentlyRenewed
 
     /// What the Limits module says when this attempt brought no usable sign-in and
-    /// no newer Claude Code sign-in could be adopted. Only a refusal is "expired".
-    public var failure: LimitsFailure { self == .rejected ? .expired : .unavailable }
+    /// no newer Claude Code sign-in could be adopted. A refusal is "expired". So is
+    /// a renewal skipped as recent when it was asked for because the feed refused
+    /// the sign-in (`afterFeedRefusal`): the feed refused one renewed minutes ago,
+    /// which is what read as "expired" the first time, so the label stays put and
+    /// polls keep the 30-minute wait instead of backing off from 60 s. Anything
+    /// else is "unavailable".
+    public func failure(afterFeedRefusal: Bool) -> LimitsFailure {
+        switch self {
+        case .rejected: return .expired
+        case .recentlyRenewed: return afterFeedRefusal ? .expired : .unavailable
+        case .renewed, .inconclusive, .notSent: return .unavailable
+        }
+    }
 }
 
 extension TokenRefresh {
@@ -103,30 +121,40 @@ extension TokenRefresh {
 }
 
 /// One renewal per 10 minutes, across polls. Inside the window the last attempt's
-/// verdict stands, except that a renewal that worked reads as no verdict: being
-/// asked again so soon (the feed refused the new token, or a stale copy expired)
-/// says nothing against the sign-in. Measured on a monotonic clock that keeps
+/// verdict stands: a refusal, no verdict, or "recently renewed" for a renewal
+/// that worked (never a refusal: what it means depends on why a renewal was
+/// asked for again, see `RenewalOutcome.failure`). Measured on a monotonic clock that keeps
 /// counting through sleep, so setting the Mac's clock either way can't shorten
 /// or stretch the window.
 public struct RenewalSpacing: Sendable {
     public static let interval: Duration = .seconds(600)
 
-    /// When the last attempt that may have reached the server started, and whether
-    /// the server refused it. Never a token.
-    private var last: (at: ContinuousClock.Instant, refused: Bool)?
+    private enum Verdict: Sendable { case refused, renewed, none }
+
+    /// When the last attempt that may have reached the server started, and how it
+    /// ended. Never a token.
+    private var last: (at: ContinuousClock.Instant, verdict: Verdict)?
 
     public init() {}
 
     /// nil: a renewal may be sent now. Otherwise the outcome that stands for one asked for at `now`.
     public func standing(at now: ContinuousClock.Instant) -> RenewalOutcome? {
         guard let last, now - last.at < Self.interval else { return nil }
-        return last.refused ? .rejected : .inconclusive
+        switch last.verdict {
+        case .refused: return .rejected
+        case .renewed: return .recentlyRenewed
+        case .none: return .inconclusive
+        }
     }
 
     /// Records an attempt started at `startedAt`. One that never left the Mac gives the slot back.
     public mutating func record(_ outcome: RenewalOutcome, startedAt: ContinuousClock.Instant) {
-        guard outcome != .notSent else { return }
-        last = (startedAt, outcome == .rejected)
+        switch outcome {
+        case .notSent, .recentlyRenewed: return
+        case .rejected: last = (startedAt, .refused)
+        case .renewed: last = (startedAt, .renewed)
+        case .inconclusive: last = (startedAt, .none)
+        }
     }
 }
 

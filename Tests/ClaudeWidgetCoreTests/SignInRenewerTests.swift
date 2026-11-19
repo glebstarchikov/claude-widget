@@ -117,7 +117,9 @@ final class SignInRenewerTests: XCTestCase {
         a.replies = [tokens("AAA-new", "RRR-new")]
         guard case .renewed(let new) = await a.renewer.renew(old) else { return XCTFail() }
         let again = await a.renewer.renew(new)
-        XCTAssertEqual(again, .inconclusive, "a renewal that worked never reads as refused")
+        XCTAssertEqual(again, .recentlyRenewed, "a renewal that worked never reads as refused")
+        XCTAssertEqual(again.failure(afterFeedRefusal: true), .expired, "the feed refused it again: same verdict")
+        XCTAssertEqual(again.failure(afterFeedRefusal: false), .unavailable)
         XCTAssertEqual(a.sent, ["RRR-old"])
     }
 
@@ -290,7 +292,7 @@ final class SignInRenewerTests: XCTestCase {
         b.replies = [status(400)]
         let outcome = await b.renewer.renew(r1)
         XCTAssertEqual(outcome, .notSent, "no verdict")
-        XCTAssertEqual(outcome.failure, .unavailable, "never Sign-in expired")
+        XCTAssertEqual(outcome.failure(afterFeedRefusal: true), .unavailable, "never Sign-in expired")
         XCTAssertEqual(b.sent, [])
 
         let stored = try marker(at: path)

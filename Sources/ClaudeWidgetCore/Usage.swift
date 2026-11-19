@@ -106,6 +106,12 @@ public enum UsageRequest {
         r.setValue(TokenRefresh.userAgent, forHTTPHeaderField: "User-Agent")
         return r
     }
+
+    /// 401/403: the feed refused the sign-in. Any other status that isn't a readable
+    /// 200 (429, 5xx, …), like no answer at all, says nothing about it.
+    public static func refused(status: Int) -> Bool {
+        status == 401 || status == 403
+    }
 }
 
 public enum ResetFormat {

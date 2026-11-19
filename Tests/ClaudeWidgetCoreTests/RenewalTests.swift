@@ -30,7 +30,8 @@ final class RenewalTests: XCTestCase {
         for status in [400, 401, 403] {
             let outcome = self.outcome(status, #"{"error":"invalid_grant"}"#)
             XCTAssertEqual(outcome, .rejected, "\(status)")
-            XCTAssertEqual(outcome.failure, .expired, "\(status)")
+            XCTAssertEqual(outcome.failure(afterFeedRefusal: false), .expired, "\(status)")
+            XCTAssertEqual(outcome.failure(afterFeedRefusal: true), .expired, "\(status)")
         }
     }
 
@@ -38,7 +39,8 @@ final class RenewalTests: XCTestCase {
         for status in [429, 500, 502, 503, 504, 404, 302, 0] {
             let outcome = self.outcome(status, #"{"error":"overloaded"}"#)
             XCTAssertEqual(outcome, .inconclusive, "\(status)")
-            XCTAssertEqual(outcome.failure, .unavailable, "\(status)")
+            XCTAssertEqual(outcome.failure(afterFeedRefusal: false), .unavailable, "\(status)")
+            XCTAssertEqual(outcome.failure(afterFeedRefusal: true), .unavailable, "\(status)")
         }
     }
 
@@ -102,7 +104,8 @@ final class RenewalTests: XCTestCase {
         XCTAssertEqual(TokenRefresh.outcome(error: URLError(.notConnectedToInternet)), .notSent)
         XCTAssertEqual(TokenRefresh.outcome(error: URLError(.timedOut)), .inconclusive)
         XCTAssertEqual(TokenRefresh.outcome(error: URLError(.networkConnectionLost)), .inconclusive)
-        XCTAssertEqual(RenewalOutcome.notSent.failure, .unavailable)
+        XCTAssertEqual(RenewalOutcome.notSent.failure(afterFeedRefusal: false), .unavailable)
+        XCTAssertEqual(RenewalOutcome.notSent.failure(afterFeedRefusal: true), .unavailable)
     }
 
     func testRenewedSignInAlreadyDueIsNoVerdictNotExpired() {
@@ -110,7 +113,7 @@ final class RenewalTests: XCTestCase {
         XCTAssertEqual(TokenRefresh.usable(fresh, now: now), .renewed(fresh))
         let due = credential("due", expiresIn: 60)
         XCTAssertEqual(TokenRefresh.usable(due, now: now), .inconclusive)
-        XCTAssertEqual(TokenRefresh.usable(due, now: now).failure, .unavailable)
+        XCTAssertEqual(TokenRefresh.usable(due, now: now).failure(afterFeedRefusal: true), .unavailable)
     }
 
     // MARK: - Spacing (monotonic time)
@@ -129,11 +132,10 @@ final class RenewalTests: XCTestCase {
         XCTAssertNil(spacing.standing(at: t0 + .seconds(600)))
     }
 
-    func testSuccessWithinTheWindowNeverReadsAsRejected() {
+    func testSuccessWithinTheWindowReadsAsRecentlyRenewedNotRejected() {
         var spacing = RenewalSpacing()
         spacing.record(.renewed(credential("new")), startedAt: t0)
-        XCTAssertEqual(spacing.standing(at: t0 + .seconds(120)), .inconclusive)
-        XCTAssertEqual(spacing.standing(at: t0 + .seconds(120))?.failure, .unavailable)
+        XCTAssertEqual(spacing.standing(at: t0 + .seconds(120)), .recentlyRenewed)
         XCTAssertNil(spacing.standing(at: t0 + .seconds(601)))
     }
 
@@ -158,6 +160,51 @@ final class RenewalTests: XCTestCase {
         var spacing = RenewalSpacing()
         spacing.record(.rejected, startedAt: t0)
         XCTAssertEqual(spacing.standing(at: t0 - .seconds(3600)), .rejected)
+    }
+
+    // MARK: - The feed refusing a sign-in renewed minutes ago
+
+    /// poll → feed 401 → renewal works → feed 401 again: "Sign-in expired", next poll
+    /// in 30 min. A poll inside the 10-minute window that hits a feed 401 again must
+    /// read the same, not "Limits unavailable" with a 60 s backoff.
+    func testFeedRefusingARecentlyRenewedSignInStaysExpired() {
+        var spacing = RenewalSpacing()
+        spacing.record(.renewed(credential("new")), startedAt: t0)
+        for later in [1, 60, 120, 599] {
+            let standing = spacing.standing(at: t0 + .seconds(later))
+            let end = standing?.failure(afterFeedRefusal: true)
+            XCTAssertEqual(end, .expired, "\(later) s after the renewal")
+            XCTAssertEqual(end.map { UsagePollPolicy.nextDelay(after: $0.fetchOutcome, consecutiveFailures: 0) }, 1800)
+        }
+        XCTAssertNil(spacing.standing(at: t0 + .seconds(600)), "after the window a renewal is tried again")
+    }
+
+    func testOtherAttemptsInTheWindowStillReadUnavailableWithBackoff() {
+        // A renewal that timed out or got a 5xx gave no verdict, so a feed refusal
+        // inside its window isn't one either.
+        for attempt in [self.outcome(503, "{}"), self.outcome(429, "{}"), TokenRefresh.outcome(error: URLError(.timedOut))] {
+            var spacing = RenewalSpacing()
+            spacing.record(attempt, startedAt: t0)
+            let end = spacing.standing(at: t0 + .seconds(60))?.failure(afterFeedRefusal: true)
+            XCTAssertEqual(end, .unavailable, "\(attempt)")
+            XCTAssertEqual(end?.fetchOutcome, .failure)
+            XCTAssertEqual(UsagePollPolicy.nextDelay(after: .failure, consecutiveFailures: 1), 60)
+            XCTAssertEqual(UsagePollPolicy.nextDelay(after: .failure, consecutiveFailures: 2), 120)
+        }
+        // A sign-in that was due (not refused by the feed) inside a success's window.
+        XCTAssertEqual(RenewalOutcome.recentlyRenewed.failure(afterFeedRefusal: false), .unavailable)
+    }
+
+    func testFeedFailuresOtherThanARefusalSayNothingAboutTheSignIn() {
+        XCTAssertTrue(UsageRequest.refused(status: 401))
+        XCTAssertTrue(UsageRequest.refused(status: 403))
+        // A timeout has no status; these never reach the renewal, so they read
+        // "unavailable" with backoff even right after a renewal.
+        for status in [0, 404, 429, 500, 502, 503, 504] {
+            XCTAssertFalse(UsageRequest.refused(status: status), "\(status)")
+        }
+        XCTAssertEqual(LimitsFailure.unavailable.fetchOutcome, .failure)
+        XCTAssertEqual(LimitsFailure.expired.fetchOutcome, .unauthorized)
     }
 
     // MARK: - Re-read after the lock
