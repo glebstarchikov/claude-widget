@@ -46,4 +46,45 @@ final class CritterGeometryTests: XCTestCase {
         XCTAssertEqual(asleep[1].height, 1.05, accuracy: 0.001)
         XCTAssertEqual(asleep[1].maxY, 8.102 + 2.847, accuracy: 0.001)
     }
+
+    func testHatAndBadgeStayInsideTheCanvas() {
+        let canvas = CGRect(origin: .zero, size: CritterGeometry.canvas)
+        XCTAssertTrue(canvas.contains(CritterGeometry.hatCone().boundingBoxOfPath))
+        XCTAssertTrue(canvas.contains(CritterGeometry.hatBrim))
+        let pom = CritterGeometry.hatPom
+        XCTAssertTrue(canvas.contains(CGRect(x: pom.center.x - pom.radius, y: pom.center.y - pom.radius,
+                                             width: pom.radius * 2, height: pom.radius * 2)))
+        let b = CritterGeometry.badge, r = b.radius + CritterGeometry.badgeGap
+        XCTAssertTrue(canvas.contains(CGRect(x: b.center.x - r, y: b.center.y - r, width: r * 2, height: r * 2)))
+    }
+
+    func testBodyWithHatStaysInsideTheCanvas() {
+        let canvas = CGRect(origin: .zero, size: CritterGeometry.canvas)
+        for rect in CritterGeometry.bodyRects(pose: .idle) {
+            XCTAssertTrue(canvas.contains(rect.offsetBy(dx: 0, dy: CritterGeometry.hatBodyShift)))
+        }
+    }
+
+    func testHatSitsOnTheShiftedBody() {
+        let top = CritterGeometry.bodyRects(pose: .idle)[0].minY + CritterGeometry.hatBodyShift
+        XCTAssertEqual(CritterGeometry.hatBrim.maxY, top, accuracy: 0.3)
+    }
+
+    func testPomHangsToTheSideOfTheConeCenter() {
+        let cone = CritterGeometry.hatCone().boundingBoxOfPath
+        XCTAssertNotEqual(CritterGeometry.hatPom.center.x, cone.midX, accuracy: 0.5)
+    }
+
+    func testBadgeNeverTouchesTheHat() {
+        let b = CritterGeometry.badge, p = CritterGeometry.hatPom
+        let gap = hypot(b.center.x - p.center.x, b.center.y - p.center.y) - b.radius - p.radius
+        XCTAssertGreaterThan(gap, CritterGeometry.badgeGap)
+        let badgeBox = CGRect(x: b.center.x - b.radius, y: b.center.y - b.radius, width: b.radius * 2, height: b.radius * 2)
+        XCTAssertFalse(CritterGeometry.hatCone().boundingBoxOfPath.intersects(badgeBox))
+        XCTAssertFalse(CritterGeometry.hatBrim.intersects(badgeBox))
+    }
+
+    func testBodyIsUnchangedWithoutHat() {
+        XCTAssertEqual(CritterGeometry.bodyRects(pose: .idle)[0], CGRect(x: 3, y: 5, width: 17.998, height: 12.079))
+    }
 }
