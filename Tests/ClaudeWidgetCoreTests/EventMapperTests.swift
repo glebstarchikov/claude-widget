@@ -89,6 +89,57 @@ final class EventMapperTests: XCTestCase {
         XCTAssertEqual(s.title, "My Task")
     }
 
+    // MARK: answered from the notch
+
+    private func needsYou() -> Session {
+        Session(sessionId: "s1", state: .needsYou, cwd: "/tmp/proj", message: "Bash", model: "claude-opus-4-8",
+                tool: "Bash: npm test", ownerBundleId: "com.apple.Terminal", contextTokens: 900,
+                workingSince: 10, updatedAt: 50)
+    }
+
+    func testNotchAllowResumesWorkWithANewStretch() {
+        let update = EventMapper.notchAnswered(allowed: true, payload: payload(), previous: needsYou(), now: 100)
+        guard case .write(let s) = update else { return XCTFail("expected write") }
+        XCTAssertEqual(s.state, .working)
+        XCTAssertNil(s.message, "no longer 'needs you · Bash'")
+        XCTAssertEqual(s.tool, "Bash: npm test", "the allowed tool runs now")
+        XCTAssertEqual(s.workingSince, 100, "like PreToolUse after a prompt: leaving needs-you starts a new stretch")
+        XCTAssertEqual(s.updatedAt, 100)
+        XCTAssertEqual(s.model, "claude-opus-4-8")
+        XCTAssertEqual(s.ownerBundleId, "com.apple.Terminal")
+        XCTAssertEqual(s.contextTokens, 900)
+    }
+
+    func testNotchDenyResumesWorkWithoutTheDeniedTool() {
+        let update = EventMapper.notchAnswered(allowed: false, payload: payload(), previous: needsYou(), now: 100)
+        guard case .write(let s) = update else { return XCTFail("expected write") }
+        XCTAssertEqual(s.state, .working)
+        XCTAssertNil(s.tool)
+        XCTAssertNil(s.message)
+    }
+
+    func testNotchAnswerLeavesOtherStatesAndSubagentsAlone() {
+        var moved = needsYou()
+        moved.state = .waiting
+        XCTAssertEqual(EventMapper.notchAnswered(allowed: true, payload: payload(), previous: moved, now: 100), .ignore,
+                       "a later event already moved the session on")
+        XCTAssertEqual(EventMapper.notchAnswered(allowed: true, payload: payload(), previous: nil, now: 100), .ignore,
+                       "never recreate a session file that's gone")
+        XCTAssertEqual(EventMapper.notchAnswered(allowed: true, payload: payload(",\"agent_id\":\"a1\""),
+                                                 previous: needsYou(), now: 100), .ignore,
+                       "a subagent's request never set its parent to needs-you")
+    }
+
+    func testFinishedPillSurvivesANotchAnswer() {
+        // working 10…40 → PermissionRequest → Allow from the notch at 50 → Stop at 200.
+        guard case .write(let answered) = EventMapper.notchAnswered(allowed: true, payload: payload(),
+                                                                     previous: needsYou(), now: 50),
+              case .write(let stopped) = EventMapper.map(event: "Stop", payload: payload(), previous: answered, now: 200)
+        else { return XCTFail("expected writes") }
+        let peeks = Aggregator.peekEvents(old: [answered], new: [stopped], now: 200)
+        XCTAssertEqual(peeks, [.finished(stopped, duration: 150)])
+    }
+
     func testSessionStartOnCompactPreservesModelAndTitle() {
         // The model arrives only on the initial startup SessionStart. A later
         // SessionStart (compaction / resume / clear) omits it — it must not wipe

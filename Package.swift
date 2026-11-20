@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "claude-widget",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("26.0")],
     targets: [
         .target(name: "ClaudeWidgetCore"),
         .executableTarget(

@@ -73,4 +73,68 @@ final class HooksConfigMergerTests: XCTestCase {
         let hooks = removed["hooks"] as! [String: Any]
         XCTAssertNil(hooks["SessionStart"], "event keys left empty are dropped")
     }
+
+    private func firstHook(_ settings: [String: Any], event: String) -> [String: Any] {
+        let hooks = settings["hooks"] as! [String: Any]
+        return ((hooks[event] as! [[String: Any]])[0]["hooks"] as! [[String: Any]])[0]
+    }
+
+    func testPermissionRequestEntryIsSynchronousWith60sTimeout() {
+        let merged = HooksConfigMerger.merge(settings: [:], binaryPath: binPath)
+        let hook = firstHook(merged, event: "PermissionRequest")
+        XCTAssertNil(hook["async"])
+        XCTAssertEqual(hook["timeout"] as? Int, 60)
+    }
+
+    func testOtherEntriesStayAsync() {
+        let merged = HooksConfigMerger.merge(settings: [:], binaryPath: binPath)
+        for (event, _) in HooksConfigMerger.events where event != "PermissionRequest" {
+            let hook = firstHook(merged, event: event)
+            XCTAssertEqual(hook["async"] as? Bool, true, event)
+            XCTAssertEqual(hook["timeout"] as? Int, 10, event)
+        }
+    }
+
+    private var oldAsyncSettings: [String: Any] {
+        var settings = HooksConfigMerger.merge(settings: [:], binaryPath: binPath)
+        var hooks = settings["hooks"] as! [String: Any]
+        hooks["PermissionRequest"] = [[
+            "matcher": "*",
+            "hooks": [["type": "command", "command": "\"\(binPath)\" PermissionRequest",
+                       "async": true, "timeout": 10] as [String: Any]],
+        ] as [String: Any]]
+        settings["hooks"] = hooks
+        return settings
+    }
+
+    func testOldAsyncPermissionEntryIsNotInstalled() {
+        XCTAssertFalse(HooksConfigMerger.isInstalled(settings: oldAsyncSettings))
+    }
+
+    func testMergeReplacesOldAsyncEntryWithoutDuplicating() {
+        let merged = HooksConfigMerger.merge(settings: oldAsyncSettings, binaryPath: binPath)
+        XCTAssertEqual(hookCommands(merged, event: "PermissionRequest").count, 1)
+        XCTAssertNil(firstHook(merged, event: "PermissionRequest")["async"])
+        XCTAssertTrue(HooksConfigMerger.isInstalled(settings: merged))
+    }
+
+    func testForeignSyncPermissionHookUntouched() {
+        let foreign: [String: Any] = ["matcher": "*",
+            "hooks": [["type": "command", "command": "other/guard.sh", "timeout": 5] as [String: Any]]]
+        let existing: [String: Any] = ["hooks": ["PermissionRequest": [foreign]]]
+        func foreignEntry(_ s: [String: Any]) -> [String: Any]? {
+            ((s["hooks"] as? [String: Any])?["PermissionRequest"] as? [[String: Any]])?
+                .first { !HooksConfigMerger.entryIsOurs($0) }
+        }
+        func bytes(_ e: [String: Any]?) -> Data? {
+            e.flatMap { try? JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys]) }
+        }
+        let expected = bytes(foreign)
+        let merged = HooksConfigMerger.merge(settings: existing, binaryPath: binPath)
+        XCTAssertEqual(bytes(foreignEntry(merged)), expected)
+        XCTAssertEqual(hookCommands(merged, event: "PermissionRequest").count, 2)
+        let removed = HooksConfigMerger.remove(settings: merged)
+        XCTAssertEqual(bytes(foreignEntry(removed)), expected)
+        XCTAssertEqual(hookCommands(removed, event: "PermissionRequest"), ["other/guard.sh"])
+    }
 }

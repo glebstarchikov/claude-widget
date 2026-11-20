@@ -20,15 +20,18 @@ public enum HooksConfigMerger {
         return commands.contains { $0.contains(markerSubstring) }
     }
 
+    /// PermissionRequest is the only synchronous entry: the hook blocks on the
+    /// widget's answer and prints Claude Code's decision. Everything else is fire-and-forget.
+    static func isSynchronousEvent(_ event: String) -> Bool { event == "PermissionRequest" }
+
     static func ourEntry(matcher: String?, binaryPath: String, event: String) -> [String: Any] {
-        var entry: [String: Any] = [
-            "hooks": [[
-                "type": "command",
-                "command": "\"\(binaryPath)\" \(event)",
-                "async": true,
-                "timeout": 10,
-            ] as [String: Any]]
+        var hook: [String: Any] = [
+            "type": "command",
+            "command": "\"\(binaryPath)\" \(event)",
+            "timeout": isSynchronousEvent(event) ? 60 : 10,
         ]
+        if !isSynchronousEvent(event) { hook["async"] = true }
+        var entry: [String: Any] = ["hooks": [hook]]
         if let matcher { entry["matcher"] = matcher }
         return entry
     }
@@ -64,7 +67,14 @@ public enum HooksConfigMerger {
     public static func isInstalled(settings: [String: Any]) -> Bool {
         guard let hooks = settings["hooks"] as? [String: Any] else { return false }
         return events.allSatisfy { event, _ in
-            (hooks[event] as? [[String: Any]] ?? []).contains(where: entryIsOurs)
+            (hooks[event] as? [[String: Any]] ?? []).contains { entry in
+                guard entryIsOurs(entry) else { return false }
+                guard isSynchronousEvent(event) else { return true }
+                let ours = (entry["hooks"] as? [[String: Any]] ?? []).filter {
+                    ($0["command"] as? String)?.contains(markerSubstring) == true
+                }
+                return ours.contains { $0["async"] as? Bool != true }
+            }
         }
     }
 }
