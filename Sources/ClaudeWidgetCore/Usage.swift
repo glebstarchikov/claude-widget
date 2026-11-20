@@ -39,8 +39,9 @@ public enum UsageParser {
             throw UsageParseError.notAnObject
         }
         var windows: [UsageWindow] = []
-        if let limits = root["limits"] as? [[String: Any]] {
-            for entry in limits {
+        // One malformed element (a number, a null) mustn't hide the valid windows beside it.
+        if let limits = root["limits"] as? [Any] {
+            for case let entry as [String: Any] in limits {
                 guard let percent = number(entry["percent"]) else { continue }
                 windows.append(UsageWindow(
                     label: label(for: entry),
@@ -104,6 +105,12 @@ public enum UsageRequest {
         r.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         r.setValue(TokenRefresh.userAgent, forHTTPHeaderField: "User-Agent")
         return r
+    }
+
+    /// 401/403: the feed refused the sign-in. Any other status that isn't a readable
+    /// 200 (429, 5xx, …), like no answer at all, says nothing about it.
+    public static func refused(status: Int) -> Bool {
+        status == 401 || status == 403
     }
 }
 

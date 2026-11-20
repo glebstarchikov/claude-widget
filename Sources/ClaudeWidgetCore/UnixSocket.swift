@@ -10,6 +10,17 @@ public struct UnixSocketError: Error, Equatable {
 public enum UnixSocket {
     /// Upper bound on a blocked write; the peers exchange short lines, so this only trips on a stuck peer.
     static let sendTimeout: TimeInterval = 2
+    /// The longest wait a deadline is computed for (about 31 years). Anything longer,
+    /// `.infinity` included, means "no practical limit" and is clamped to this, so
+    /// converting it to nanoseconds can't trap.
+    static let maxTimeout: TimeInterval = 1e9
+
+    /// The uptime (nanoseconds) `timeout` seconds after `now`. Never traps: a
+    /// negative or NaN timeout is `now`, and a huge or infinite one is clamped to `maxTimeout`.
+    static func deadline(after timeout: TimeInterval, from now: UInt64 = DispatchTime.now().uptimeNanoseconds) -> UInt64 {
+        let seconds = timeout > 0 ? min(timeout, maxTimeout) : 0
+        return now + UInt64(seconds * 1_000_000_000)
+    }
 
     private static func makeSocket() -> Int32? {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -154,7 +165,7 @@ public enum UnixSocket {
     /// Like `write(_:_:)` but gives up when `timeout` elapses (poll for POLLOUT, non-blocking
     /// write), so a peer that never reads cannot stall the caller past its deadline.
     public static func write(_ fd: Int32, _ data: Data, timeout: TimeInterval) -> Bool {
-        let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(0, timeout) * 1_000_000_000)
+        let deadline = Self.deadline(after: timeout)
         // MSG_DONTWAIT is not honoured for AF_UNIX on Darwin (measured), so use O_NONBLOCK for the duration.
         let flags = fcntl(fd, F_GETFL)
         guard flags != -1, fcntl(fd, F_SETFL, flags | O_NONBLOCK) != -1 else { return false }
@@ -194,7 +205,7 @@ public final class LineReader {
     /// One line without its "\n", or nil on timeout, EOF, error or an over-long line.
     /// Lines already buffered (e.g. coalesced replies) are returned without touching the socket.
     public func next(timeout: TimeInterval) -> Data? {
-        let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(0, timeout) * 1_000_000_000)
+        let deadline = UnixSocket.deadline(after: timeout)
         while true {
             if let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
                 let line = Data(buffer[buffer.startIndex..<newline])

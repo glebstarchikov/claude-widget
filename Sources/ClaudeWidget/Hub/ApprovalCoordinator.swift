@@ -7,8 +7,10 @@ import ClaudeWidgetCore
 /// `HubModel.pending` until Gleb answers, his attention moves to the session's
 /// app, Claude moves on, or 30 s pass.
 ///
-/// Nothing here approves anything by itself: `.allow` is sent only from
-/// `answer(id:allow:)`, which only the Allow buttons call.
+/// The decisions themselves live in `ApprovalRules` (Core, tested); this class
+/// feeds them app state and carries them out. Nothing here approves anything by
+/// itself: `.allow` is sent only from `answer(id:allow:)`, which only the Allow
+/// buttons call.
 @MainActor
 final class ApprovalCoordinator {
     private enum Ending {
@@ -27,11 +29,6 @@ final class ApprovalCoordinator {
         }
     }
 
-    /// Allow is ignored this soon after the pending list changed: a click aimed at
-    /// one request (or a double-click) must not land on another that slid into
-    /// its place. Deny is fail-safe and stays immediate.
-    private static let allowSettle: TimeInterval = 0.5
-
     private let model: HubModel
     private let appModel: AppModel
     private let server = ApprovalServer(path: WidgetConstants.approvalSocket.path)
@@ -39,12 +36,9 @@ final class ApprovalCoordinator {
     private var timers: [String: Task<Void, Never>] = [:]
     /// Main-loop requests whose session has shown up in `model.sessions`.
     private var sessionSeen: Set<String> = []
-    /// When (`now`) `model.pending` last gained or lost a request, a request's row
-    /// moved, the hub opened or the approval pill appeared.
-    private var queueChangedAt: TimeInterval = -.infinity
-    /// Each request's row top edge (global points) as last reported while the hub
-    /// is open. Kept by request id, so a row re-created elsewhere still counts as moved.
-    private var rowTops: [String: Double] = [:]
+    /// Restarted when `model.pending` gains or loses a request, a request's row
+    /// moves, the hub opens or the approval pill appears.
+    private var allowSettle = AllowSettle()
 
     /// Monotonic seconds (unaffected by wall-clock changes).
     private static var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
@@ -94,22 +88,19 @@ final class ApprovalCoordinator {
         server.stop()
     }
 
-    /// Allow/Deny from the pill or a row. Allow is honored only where a row would
-    /// offer it (`ApprovalPolicy.action`), and not within `allowSettle` of the
-    /// pending list changing; anything else can only be denied.
+    /// Allow/Deny from the pill or a row, through `ApprovalRules.answer`: Allow
+    /// only where a row would offer it and once the requests have settled; Deny always.
     func answer(id: String, allow: Bool) {
         guard let approval = model.pending.first(where: { $0.id == id }) else { return }
-        if allow {
-            guard ApprovalPolicy.action(for: approval.presentation, on: .row) == .allow else {
-                Logger.approval.error("allow refused: not offered for this request")
-                return
-            }
-            guard Self.now - queueChangedAt >= Self.allowSettle else {
-                Logger.approval.notice("allow ignored: requests changed under the pointer")
-                return
-            }
+        switch ApprovalRules.answer(allow: allow, presentation: approval.presentation,
+                                    settled: allowSettle.isSettled(at: Self.now)) {
+        case .send:
+            end(id, .answered(allow: allow))
+        case .allowNotOffered:
+            Logger.approval.error("allow refused: not offered for this request")
+        case .allowSettling:
+            Logger.approval.notice("allow ignored: requests changed under the pointer")
         }
-        end(id, .answered(allow: allow))
     }
 
     /// The setting was switched off: everything pending goes back to Claude Code.
@@ -121,34 +112,28 @@ final class ApprovalCoordinator {
     /// The hub closed. With proactive alerts off no pill takes over, so nothing
     /// would show the pending requests: they go back to Claude Code.
     func hubClosed() {
-        rowTops.removeAll()   // rows appearing when the hub reopens aren't moves
-        guard !appModel.notchProactive else { return }
+        allowSettle.forgetRows()   // rows appearing when the hub reopens aren't moves
+        guard !ApprovalRules.heldRequestsVisible(pillsShown: appModel.notchProactive, hubOpen: false) else { return }
         endAll(.noPill)
     }
 
     /// The hub opened, or the approval pill appeared: either can land Allow under a
     /// pointer already on its way to click something else there. Allow settles.
     func settle() {
-        queueChangedAt = Self.now
+        allowSettle.restart(at: Self.now)
     }
 
     /// A request's row reported its top edge. If it moved (not merely appeared),
     /// an Allow under the pointer may now belong to it by accident: settle again.
     func rowPositioned(id: String, top: Double) {
         guard model.pending.contains(where: { $0.id == id }) else { return }
-        let previous = rowTops[id]
-        if ApprovalLayout.rowMoved(from: previous, to: top) {
-            queueChangedAt = Self.now
-            rowTops[id] = top
-        } else if previous == nil {
-            rowTops[id] = top
-        }
+        allowSettle.rowReported(id: id, top: top, at: Self.now)
     }
 
     /// Proactive alerts were switched off: with the hub closed, nothing shows the
     /// pending requests any more.
     func proactiveChanged(enabled: Bool) {
-        guard !enabled, !model.expanded else { return }
+        guard !ApprovalRules.heldRequestsVisible(pillsShown: enabled, hubOpen: model.expanded) else { return }
         endAll(.noPill)
     }
 
@@ -171,25 +156,14 @@ final class ApprovalCoordinator {
     // MARK: - Rules
 
     private func receive(_ request: ApprovalRequest, reply: @escaping ApprovalServer.Reply) -> @MainActor () -> Void {
-        // Pass straight back to Claude Code's prompt when this widget mustn't hold
-        // it: an unknown protocol version, the setting off, a tool that isn't a
-        // permission, an owner app we can't watch, or Gleb already in that app.
-        let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        guard request.v == 1,
-              appModel.answerFromNotch,
-              !ApprovalPolicy.hookSkips(toolName: request.toolName),
-              let owner = request.ownerBundleId, !owner.isEmpty,
-              owner != frontmost,
-              replies[request.id] == nil
-        else {
+        let arrival = ApprovalRules.arrival(
+            of: request, answerFromNotch: appModel.answerFromNotch,
+            frontmostBundleId: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+            alreadyHeld: replies[request.id] != nil,
+            pillsShown: appModel.notchProactive, hubOpen: model.expanded)
+        if case .pass(let reason) = arrival {
             reply(.pass)
-            Logger.approval.notice("\(request.toolName, privacy: .public) passed on arrival")
-            return {}
-        }
-        // Held requests must be on screen: the pill (proactive alerts) or the open hub.
-        guard appModel.notchProactive || model.expanded else {
-            reply(.pass)
-            Logger.approval.notice("\(request.toolName, privacy: .public) passed: no pill")
+            Logger.approval.notice("\(request.toolName, privacy: .public) passed on arrival: \(reason.rawValue, privacy: .public)")
             return {}
         }
 
@@ -203,7 +177,7 @@ final class ApprovalCoordinator {
             if !Task.isCancelled { self?.end(approval.id, .timedOut) }
         }
         model.pending.append(approval)
-        queueChangedAt = Self.now
+        allowSettle.restart(at: Self.now)
         Logger.approval.notice("\(request.toolName, privacy: .public) \(request.id, privacy: .public) held for an answer")
         onChange?(nil)
         scheduleAutoAnswer(approval)
@@ -212,8 +186,8 @@ final class ApprovalCoordinator {
 
     /// The moment a request's owning app comes to the front, its own prompt takes over.
     private func appActivated(_ bundleId: String?) {
-        guard let bundleId else { return }
-        for approval in model.pending where approval.request.ownerBundleId == bundleId {
+        for approval in model.pending
+        where ApprovalRules.ownerIsActive(owner: approval.request.ownerBundleId, active: bundleId) {
             end(approval.id, .ownerActive)
         }
     }
@@ -223,10 +197,10 @@ final class ApprovalCoordinator {
         guard let reply = replies.removeValue(forKey: id) else { return }
         timers.removeValue(forKey: id)?.cancel()
         sessionSeen.remove(id)
-        rowTops[id] = nil
+        allowSettle.forgetRow(id)
         let request = model.pending.first { $0.id == id }?.request
         model.pending.removeAll { $0.id == id }
-        queueChangedAt = Self.now
+        allowSettle.restart(at: Self.now)
         switch ending {
         case .answered(let allow): reply(allow ? .allow : .deny)
         case .closed: break

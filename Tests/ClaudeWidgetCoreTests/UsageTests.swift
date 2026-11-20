@@ -63,6 +63,22 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(u.windows.map(\.isActive), [false, false, false, false])
     }
 
+    func testOneMalformedLimitsElementKeepsTheValidOnes() throws {
+        let json = #"{"limits":[{"group":"weekly","percent":78},5,null,"x",[1],{"group":"five_hour","percent":12}],"seven_day":{"utilization":99}}"#
+        let u = try UsageParser.parseClaude(Data(json.utf8), fetchedAt: Date())
+        XCTAssertEqual(u.windows.map(\.label), ["week", "5h"])
+        XCTAssertEqual(u.windows.map(\.percent), [78, 12], "not the seven_day fallback")
+    }
+
+    func testLimitsWithNothingUsableStillFallsBack() throws {
+        for limits in [#"[5,null,"x"]"#, #"{"group":"weekly","percent":78}"#, #"[{"group":"weekly"}]"#] {
+            let json = #"{"limits":\#(limits),"seven_day":{"utilization":10}}"#
+            let u = try UsageParser.parseClaude(Data(json.utf8), fetchedAt: Date())
+            XCTAssertEqual(u.windows.map(\.label), ["week"], limits)
+            XCTAssertEqual(u.windows.map(\.percent), [10], limits)
+        }
+    }
+
     func testNoWindowsThrows() {
         for body in ["{}", #"{"limits":[]}"#, #"{"five_hour":null,"seven_day":null}"#, "[]"] {
             XCTAssertThrowsError(try UsageParser.parseClaude(Data(body.utf8), fetchedAt: Date()), body)

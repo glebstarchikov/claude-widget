@@ -19,15 +19,7 @@ enum WidgetKeychain {
     /// `security`'s exit status for errSecItemNotFound.
     private static let notFound: Int32 = 44
 
-    enum Read {
-        case found(OAuthCredential)
-        /// No entry, or one that doesn't decode: safe to replace.
-        case absent
-        /// Any other failure (e.g. a locked Keychain): the entry may exist, so don't replace it.
-        case failed(Int32)
-    }
-
-    static func readOwn() async -> Read {
+    static func readOwn() async -> StoredSignIn {
         let out = await run(["find-generic-password", "-s", service, "-a", NSUserName(), "-w"])
         if out.status == notFound { return .absent }
         guard out.status == 0 else { return .failed(out.status) }

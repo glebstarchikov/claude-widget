@@ -67,11 +67,14 @@ public enum TokenRefresh {
         return [.notConnectedToInternet, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed].contains(code)
     }
 
+    /// The documented shape only, with an `expires_in` in (0, `maxLifetime`]. A 200
+    /// that isn't goes to `salvage` instead (see `outcome(status:body:sent:now:)`).
     public static func parseResponse(_ data: Data, now: Date) throws -> OAuthCredential {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let access = root["access_token"] as? String, !access.isEmpty,
               let refresh = root["refresh_token"] as? String, !refresh.isEmpty,
-              let expiresIn = root["expires_in"] as? NSNumber, CFGetTypeID(expiresIn) != CFBooleanGetTypeID()
+              let expiresIn = root["expires_in"] as? NSNumber, CFGetTypeID(expiresIn) != CFBooleanGetTypeID(),
+              expiresIn.doubleValue > 0, expiresIn.doubleValue <= maxLifetime
         else { throw TokenRefreshError.malformedResponse }
         return OAuthCredential(accessToken: access, refreshToken: refresh,
                                expiresAt: now.addingTimeInterval(expiresIn.doubleValue))
