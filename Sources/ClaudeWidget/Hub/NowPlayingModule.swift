@@ -17,28 +17,32 @@ struct NowPlayingModule: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack(spacing: 12) {
-                Button(action: openApp) {
-                    HStack(spacing: 12) {
-                        artworkView
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(track.title)
-                                .font(.system(size: 13, weight: .semibold))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                            Text(track.subtitle)
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                            if let progress = track.progress(at: context.date) {
-                                progressBar(min(max(progress, 0), 1))
-                            }
+                // A tap gesture, not a Button: the hub panel is never key, and a Button's
+                // label dims in a non-key window (AgentsModule's rows do the same).
+                HStack(spacing: 12) {
+                    artworkView
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(track.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Text(track.subtitle)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        if let progress = track.progress(at: context.date) {
+                            progressBar(min(max(progress, 0), 1))
                         }
                     }
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
+                .contentShape(Rectangle())
+                .onTapGesture(perform: openApp)
                 .help("Open \(track.appName ?? "the player")")
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction(named: "Open app", openApp)
                 Spacer(minLength: 8)
                 HStack(spacing: 14) {
                     control("backward.fill", label: "Previous") { command(.previous) }
@@ -81,10 +85,20 @@ struct NowPlayingModule: View {
 
     private func control(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 14))
+            Image(systemName: symbol).font(.system(size: 14)).foregroundStyle(.primary)
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(AsIsButtonStyle())
         .help(label)
         .accessibilityLabel(label)
+    }
+}
+
+/// Draws the label as-is. `.borderless` dims its label in a window that isn't key,
+/// and the hub panel never is; a press still dims a little.
+private struct AsIsButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.6 : 1)
     }
 }
