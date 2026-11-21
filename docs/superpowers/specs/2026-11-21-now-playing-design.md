@@ -1,6 +1,6 @@
 # Now playing — design
 
-**Status:** draft for Gleb's review, 2026-11-21. Project 2 of the notch hub (`2026-11-17-notch-hub-design.md`), built on themes (`2026-11-19-themes-design.md`). Labels: [Gleb …] is his decision; [my call] is mine, open to correction.
+**Status:** approved by Gleb, 2026-11-21 ("Approved"). Project 2 of the notch hub (`2026-11-17-notch-hub-design.md`), built on themes (`2026-11-19-themes-design.md`). Labels: [Gleb …] is his decision; [my call] is mine, open to correction.
 
 ## 1. Intent
 
