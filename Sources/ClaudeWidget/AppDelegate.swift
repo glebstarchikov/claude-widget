@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var limitsToggle: AnyCancellable?
     private var nowPlaying: NowPlayingMonitor!
     private var nowPlayingToggle: AnyCancellable?
+    private var strip: NotchStripController!
     private var approvals: ApprovalCoordinator!
     private var approvalsToggle: AnyCancellable?
     private var proactiveToggle: AnyCancellable?
@@ -96,6 +97,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         nowPlayingToggle = model.$nowPlayingEnabled.sink { [weak self] enabled in
             if enabled { self?.nowPlaying.start() } else { self?.nowPlaying.stop() }
         }
+        strip = NotchStripController(model: hubModel, appModel: model, hub: hub)
+        strip.start()
 
         approvals = ApprovalCoordinator(model: hubModel, appModel: model)
         hubModel.answerApproval = { [weak self] id, allow in self?.approvals.answer(id: id, allow: allow) }
