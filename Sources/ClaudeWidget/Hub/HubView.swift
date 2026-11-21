@@ -18,11 +18,13 @@ enum HubLayout {
     static let maxListHeight: CGFloat = 6 * 36
     /// Limits module content: a ring with its label, or up to three lines of text.
     static let limitsHeight: CGFloat = 54
+    /// Now-playing card content: 44 pt artwork with room above and below.
+    static let nowPlayingHeight: CGFloat = 48
     /// Transparent room around the content inside the panel, for the glass
     /// shadow and the spring's overshoot.
     static let margin: CGFloat = 24
 
-    static var maxHubHeight: CGFloat { limitsHeight + moduleSpacing + maxListHeight + 4 * modulePadding }
+    static var maxHubHeight: CGFloat { limitsHeight + nowPlayingHeight + 2 * moduleSpacing + maxListHeight + 6 * modulePadding }
     static var panelSize: CGSize {
         CGSize(width: width + 2 * margin, height: maxHubHeight + 2 * margin)
     }
@@ -63,6 +65,13 @@ struct HubView: View {
                     if model.limits != .off {
                         LimitsModule(state: model.limits, fromCache: model.limitsFromCache,
                                      saveFailed: model.limitsSaveFailed, openSettings: model.openSettings)
+                            .padding(HubLayout.modulePadding)
+                            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: HubLayout.cornerRadius,
+                                                                        style: .continuous))
+                    }
+                    if let track = model.nowPlaying {
+                        NowPlayingModule(track: track, artwork: model.nowPlayingArtwork,
+                                         command: model.nowPlayingCommand, openApp: model.openNowPlayingApp)
                             .padding(HubLayout.modulePadding)
                             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: HubLayout.cornerRadius,
                                                                         style: .continuous))
@@ -113,5 +122,6 @@ struct HubView: View {
         .animation(animation, value: model.expanded)
         .animation(animation, value: model.pill)
         .animation(animation, value: model.pending)
+        .animation(animation, value: model.nowPlaying == nil)
     }
 }
