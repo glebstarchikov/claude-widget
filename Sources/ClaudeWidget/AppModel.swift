@@ -28,6 +28,19 @@ final class AppModel: ObservableObject {
         didSet { UserDefaults.standard.set(limitsEnabled, forKey: "limitsEnabled") }
     }
 
+    /// Show what's playing in the hub. Off stops the adapter's perl process.
+    @Published var nowPlayingEnabled: Bool {
+        didSet { UserDefaults.standard.set(nowPlayingEnabled, forKey: "nowPlayingEnabled") }
+    }
+
+    /// Also show it around the closed notch.
+    @Published var nowPlayingNotchEnabled: Bool {
+        didSet { UserDefaults.standard.set(nowPlayingNotchEnabled, forKey: "nowPlayingNotchEnabled") }
+    }
+
+    /// The listener kept dying and was given up on (NowPlayingMonitor). Not persisted.
+    @Published var nowPlayingUnavailable = false
+
     @Published var theme: ThemeID {
         didSet { UserDefaults.standard.set(theme.rawValue, forKey: "theme"); applyTheme() }
     }
@@ -88,6 +101,8 @@ final class AppModel: ObservableObject {
         answerFromNotch = UserDefaults.standard.bool(forKey: "answerFromNotchEnabled")
         notchProactive = UserDefaults.standard.bool(forKey: "notchProactiveEnabled")
         limitsEnabled = UserDefaults.standard.bool(forKey: "limitsEnabled")
+        nowPlayingEnabled = UserDefaults.standard.bool(forKey: "nowPlayingEnabled")
+        nowPlayingNotchEnabled = UserDefaults.standard.bool(forKey: "nowPlayingNotchEnabled")
         theme = ThemeID(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .claude
         let storedColor = UserDefaults.standard.string(forKey: "themeCustomColor") ?? ""
         customThemeColor = RGB(hex: storedColor) == nil ? ThemePalette.defaultCustom.hex : storedColor

@@ -31,6 +31,17 @@ struct SettingsView: View {
                 Toggle("Answer permission prompts", isOn: $model.answerFromNotch)
             }
 
+            Section("Music") {
+                Toggle("Show what's playing", isOn: $model.nowPlayingEnabled)
+                if model.nowPlayingUnavailable {
+                    Text("Not available on this version of macOS.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Toggle("Around the closed notch", isOn: $model.nowPlayingNotchEnabled)
+                    .disabled(!model.nowPlayingEnabled)
+            }
+
             Section("Limits") {
                 Toggle("Show Claude limits", isOn: $model.limitsEnabled)
             }
