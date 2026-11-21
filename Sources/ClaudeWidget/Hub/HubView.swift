@@ -43,9 +43,12 @@ struct HubView: View {
     @State private var scrollOffset: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var animation: Animation {
+    /// The hub's spring, or a quick fade with Reduce Motion. The notch strip grows with it too.
+    static func animation(reduceMotion: Bool) -> Animation {
         reduceMotion ? .easeInOut(duration: 0.15) : .spring(response: 0.45, dampingFraction: 0.75)
     }
+
+    private var animation: Animation { Self.animation(reduceMotion: reduceMotion) }
 
     private var transition: AnyTransition {
         reduceMotion ? .opacity : .asymmetric(

@@ -73,17 +73,19 @@ public struct NowPlaying: Equatable, Sendable {
 
 /// The now-playing decisions, apart from AppKit and the adapter so each can be tested.
 public enum NowPlayingRules {
-    /// A pause keeps the strip this long, so a skip or a brief gap doesn't make it flicker.
+    /// A pause or a stop keeps the strip this long, so a skip or a brief gap doesn't make it flicker.
     public static let pauseGrace: TimeInterval = 3
     /// Waits before restarting the listener after its 1st, 2nd and 3rd unexpected exit.
     public static let restartDelays: [TimeInterval] = [1, 10, 60]
     /// Only exits this recent count towards giving up.
     public static let failureWindow: TimeInterval = 300
 
-    /// When the current pause began. Only a play-to-pause change starts it: a track
-    /// already paused at launch never shows the strip.
+    /// When the current pause (or stop) began. Only a change from playing starts it:
+    /// a track already paused at launch, or nothing playing at launch, never shows
+    /// the strip. A stop (no track) gets the same grace as a pause, so a skip that
+    /// passes through nothing doesn't flicker; one after a pause keeps that pause's start.
     public static func pausedAt(previous: NowPlaying?, next: NowPlaying?, previousPausedAt: Date?, now: Date) -> Date? {
-        guard let next, !next.isPlaying else { return nil }
+        if let next, next.isPlaying { return nil }
         if previous?.isPlaying == true { return now }
         return previousPausedAt
     }
@@ -114,12 +116,11 @@ public enum NowPlayingRules {
     }
 
     /// Whether the strip beside the closed notch shows: it yields to the hub, the
-    /// approval pill and fullscreen, and outlives a pause only for `pauseGrace`.
+    /// approval pill and fullscreen, and outlives a pause or a stop only for `pauseGrace`.
     public static func showsStrip(_ inputs: StripInputs) -> Bool {
         guard inputs.enabled, inputs.notchEnabled, inputs.hasNotch,
-              !inputs.hubOpen, !inputs.pillUp, !inputs.fullscreen,
-              let track = inputs.track else { return false }
-        if track.isPlaying { return true }
+              !inputs.hubOpen, !inputs.pillUp, !inputs.fullscreen else { return false }
+        if inputs.track?.isPlaying == true { return true }
         guard let pausedAt = inputs.pausedAt else { return false }
         return inputs.now < pausedAt.addingTimeInterval(pauseGrace)
     }

@@ -18,6 +18,8 @@ cp .build/release/claude-widget-hook "$APP/Contents/MacOS/"
 # MediaRemote adapter: the executable's rpath is @loader_path, so the dylib sits beside it.
 cp .build/release/libMediaRemoteAdapter.dylib "$APP/Contents/MacOS/"
 cp Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/Resources/run.pl "$APP/Contents/Resources/"
+# Its BSD 3-Clause license asks for the notice in what ships with a binary.
+cp Vendor/MediaRemoteAdapter/LICENSE "$APP/Contents/Resources/MediaRemoteAdapter-LICENSE.txt"
 
 # Render the critter app icon into an iconset, then compile to .icns.
 ICONSET="build/AppIcon.iconset"

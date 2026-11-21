@@ -23,7 +23,7 @@ final class NowPlayingMonitor {
     init(model: HubModel) { self.model = model }
 
     func start() {
-        guard controller == nil, !previewing else { return }
+        guard controller == nil, restartTask == nil, !previewing else { return }
         if let preview = UserDefaults.standard.string(forKey: "nowPlayingPreview"), preview == "YES" || preview == "sparse" {
             previewing = true
             publishPreview(sparse: preview == "sparse")
@@ -63,25 +63,32 @@ final class NowPlayingMonitor {
 
     func openApp() {
         guard !previewing, let track = model.nowPlaying else { return }
-        if let pid = track.pid, let app = NSRunningApplication(processIdentifier: pid) {
-            app.activate()
-        } else if let id = track.bundleId, let app = NSRunningApplication.runningApplications(withBundleIdentifier: id).first {
-            app.activate()
-        }
+        activateOwnerApp(track.bundleId, pid: track.pid)
     }
 
     // MARK: - Listener
 
     private func listen() {
         let controller = MediaController()
-        controller.onTrackInfoReceived = { [weak self] info in
-            MainActor.assumeIsolated { self?.received(info) }
+        // Only the current controller is heard: a payload or an exit queued before
+        // stop() or a restart dropped it must not republish a track or schedule a restart.
+        controller.onTrackInfoReceived = { [weak self, weak controller] info in
+            MainActor.assumeIsolated {
+                guard let self, let controller, self.controller === controller else { return }
+                self.received(info)
+            }
         }
-        controller.onListenerTerminated = { [weak self] in
-            MainActor.assumeIsolated { self?.listenerExited() }
+        controller.onListenerTerminated = { [weak self, weak controller] in
+            MainActor.assumeIsolated {
+                guard let self, let controller, self.controller === controller else { return }
+                self.listenerExited()
+            }
         }
-        controller.onDecodingError = { error, data in
-            Logger.nowPlaying.error("could not decode an update (\(data.count, privacy: .public) bytes)")
+        controller.onDecodingError = { [weak self, weak controller] error, data in
+            MainActor.assumeIsolated {
+                guard let self, let controller, self.controller === controller else { return }
+                Logger.nowPlaying.error("could not decode an update (\(data.count, privacy: .public) bytes)")
+            }
         }
         self.controller = controller
         controller.startListening()

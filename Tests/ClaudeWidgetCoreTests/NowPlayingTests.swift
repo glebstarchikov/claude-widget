@@ -63,14 +63,82 @@ final class NowPlayingTests: XCTestCase {
         XCTAssertTrue(resumed.isPlaying)
         XCTAssertEqual(resumed.elapsed(at: t0.addingTimeInterval(52)), 7.065291, accuracy: 1e-3)
     }
+    func testToggledPlaybackLiftsOnlyAZeroRateAndOnlyWhenStarting() throws {
+        let started = try XCTUnwrap(chrome(playing: false, rate: nil)).toggledPlayback(at: t0)
+        XCTAssertTrue(started.isPlaying); XCTAssertEqual(started.rate, 1)    // a start from 0 runs at 1
+        let stalled = try XCTUnwrap(chrome(playing: true, rate: 0)).toggledPlayback(at: t0)
+        XCTAssertFalse(stalled.isPlaying); XCTAssertEqual(stalled.rate, 0)   // pausing leaves 0 alone
+        let fast = try XCTUnwrap(chrome(playing: false, rate: 1.5)).toggledPlayback(at: t0)
+        XCTAssertTrue(fast.isPlaying); XCTAssertEqual(fast.rate, 1.5)        // resuming keeps the stored rate
+    }
     func testPausedAt() throws {
         let playing = try XCTUnwrap(chrome()), paused = try XCTUnwrap(chrome(playing: false))
         let now = t0.addingTimeInterval(30), earlier = t0.addingTimeInterval(20)
         XCTAssertEqual(NowPlayingRules.pausedAt(previous: playing, next: paused, previousPausedAt: nil, now: now), now)
         XCTAssertEqual(NowPlayingRules.pausedAt(previous: paused, next: paused, previousPausedAt: earlier, now: now), earlier)
         XCTAssertNil(NowPlayingRules.pausedAt(previous: paused, next: playing, previousPausedAt: earlier, now: now))
-        XCTAssertNil(NowPlayingRules.pausedAt(previous: playing, next: nil, previousPausedAt: nil, now: now))
         XCTAssertNil(NowPlayingRules.pausedAt(previous: nil, next: paused, previousPausedAt: nil, now: now)) // paused at launch
+        // A stop (NIL) starts the grace like a pause does; one after a pause keeps that pause's start.
+        XCTAssertEqual(NowPlayingRules.pausedAt(previous: playing, next: nil, previousPausedAt: nil, now: now), now)
+        XCTAssertEqual(NowPlayingRules.pausedAt(previous: paused, next: nil, previousPausedAt: earlier, now: now), earlier)
+        XCTAssertEqual(NowPlayingRules.pausedAt(previous: nil, next: nil, previousPausedAt: earlier, now: now), earlier)
+        XCTAssertNil(NowPlayingRules.pausedAt(previous: nil, next: nil, previousPausedAt: nil, now: now)) // NIL at launch
+    }
+
+    /// Reports fed through `pausedAt` and `showsStrip` the way the monitor and the strip use them.
+    struct Feed {
+        var track: NowPlaying?
+        var pausedAt: Date?
+        mutating func receive(_ next: NowPlaying?, at now: Date) {
+            pausedAt = NowPlayingRules.pausedAt(previous: track, next: next, previousPausedAt: pausedAt, now: now)
+            track = next
+        }
+        func shows(at now: Date) -> Bool {
+            NowPlayingRules.showsStrip(.init(track: track, pausedAt: pausedAt, now: now, hubOpen: false, pillUp: false,
+                                             fullscreen: false, hasNotch: true, enabled: true, notchEnabled: true))
+        }
+    }
+    func at(_ s: TimeInterval) -> Date { t0.addingTimeInterval(s) }
+
+    func testNilAtLaunchShowsNoStrip() {
+        var feed = Feed()
+        feed.receive(nil, at: at(0))
+        XCTAssertNil(feed.pausedAt)
+        XCTAssertFalse(feed.shows(at: at(0))); XCTAssertFalse(feed.shows(at: at(1)))
+    }
+    func testStopKeepsTheStripForTheGraceThenHides() throws {
+        var feed = Feed()
+        feed.receive(try XCTUnwrap(chrome()), at: at(0))
+        feed.receive(nil, at: at(10))
+        XCTAssertTrue(feed.shows(at: at(10))); XCTAssertTrue(feed.shows(at: at(12.9)))
+        XCTAssertFalse(feed.shows(at: at(13.0)))
+    }
+    func testSkipThroughNilNeverHidesTheStrip() throws {
+        let next = try XCTUnwrap(NowPlaying(title: "Have a Cigar", artist: "Pink Floyd", album: nil, appName: "Google Chrome",
+                                            bundleId: nil, pid: nil, isPlaying: true, durationMicros: 308e6,
+                                            elapsedMicros: 0, timestampMicros: nil, rate: 1, receivedAt: at(11)))
+        var feed = Feed()
+        feed.receive(try XCTUnwrap(chrome()), at: at(0)); XCTAssertTrue(feed.shows(at: at(0)))
+        feed.receive(nil, at: at(10)); XCTAssertTrue(feed.shows(at: at(10))); XCTAssertTrue(feed.shows(at: at(10.5)))
+        feed.receive(next, at: at(11)); XCTAssertTrue(feed.shows(at: at(11)))
+        XCTAssertNil(feed.pausedAt)
+        XCTAssertTrue(feed.shows(at: at(14)))   // past the NIL's grace: the new track holds it
+    }
+    func testNilDoesNotRestartARunningOrSpentGrace() throws {
+        let playing = try XCTUnwrap(chrome()), paused = try XCTUnwrap(chrome(playing: false))
+        // A NIL inside a pause's grace keeps the pause's deadline.
+        var feed = Feed()
+        feed.receive(playing, at: at(0)); feed.receive(paused, at: at(10)); feed.receive(nil, at: at(11))
+        XCTAssertTrue(feed.shows(at: at(12.9))); XCTAssertFalse(feed.shows(at: at(13.0)))
+        // A NIL after a pause whose grace ran out shows nothing.
+        feed = Feed()
+        feed.receive(playing, at: at(0)); feed.receive(paused, at: at(10)); feed.receive(paused, at: at(20))
+        feed.receive(nil, at: at(30))
+        XCTAssertFalse(feed.shows(at: at(30)))
+        // A second NIL doesn't extend the first one's grace.
+        feed = Feed()
+        feed.receive(playing, at: at(0)); feed.receive(nil, at: at(10)); feed.receive(nil, at: at(12))
+        XCTAssertTrue(feed.shows(at: at(12.9))); XCTAssertFalse(feed.shows(at: at(13.0)))
     }
     func testShowsStrip() throws {
         let base = NowPlayingRules.StripInputs(track: try XCTUnwrap(chrome()), pausedAt: nil, now: t0, hubOpen: false,
@@ -85,6 +153,11 @@ final class NowPlayingTests: XCTestCase {
         paused.now = t0.addingTimeInterval(2.9); XCTAssertTrue(NowPlayingRules.showsStrip(paused))
         paused.now = t0.addingTimeInterval(3.0); XCTAssertFalse(NowPlayingRules.showsStrip(paused))
         paused.pausedAt = nil; paused.now = t0; XCTAssertFalse(NowPlayingRules.showsStrip(paused))
+        // Stopped (no track) inside the grace: shows, and still yields to every blocker.
+        var stopped = base; stopped.track = nil; stopped.pausedAt = t0
+        stopped.now = t0.addingTimeInterval(2.9); XCTAssertTrue(NowPlayingRules.showsStrip(stopped))
+        for (path, value) in blockers { var s = stopped; s[keyPath: path] = value; XCTAssertFalse(NowPlayingRules.showsStrip(s), "stopped \(path)") }
+        stopped.now = t0.addingTimeInterval(3.0); XCTAssertFalse(NowPlayingRules.showsStrip(stopped))
     }
     func testRestartBackoffAndGiveUp() {
         let now = t0

@@ -44,7 +44,8 @@ struct NowPlayingModule: View {
                 .accessibilityAddTraits(.isButton)
                 .accessibilityAction(named: "Open app", openApp)
                 Spacer(minLength: 8)
-                HStack(spacing: 14) {
+                // 3 pt between 28 pt targets keeps the symbols 31 pt apart, as at 14 pt spacing.
+                HStack(spacing: 3) {
                     control("backward.fill", label: "Previous") { command(.previous) }
                     control(track.isPlaying ? "pause.fill" : "play.fill",
                             label: track.isPlaying ? "Pause" : "Play") { command(.togglePlayPause) }
@@ -86,6 +87,8 @@ struct NowPlayingModule: View {
     private func control(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 14)).foregroundStyle(.primary)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())   // the whole 28 pt square takes the click
         }
         .buttonStyle(AsIsButtonStyle())
         .help(label)

@@ -82,11 +82,11 @@ final class NotchStripController {
             notchEnabled: appModel.nowPlayingNotchEnabled)
         let show = NowPlayingRules.showsStrip(inputs)
         scheduleGraceEnd(inputs)
-        // Only while there's a track: one that stops keeps its look while the strip leaves.
-        if let track = inputs.track {
-            if state.artwork !== model.nowPlayingArtwork { state.artwork = model.nowPlayingArtwork }
-            if state.playing != track.isPlaying { state.playing = track.isPlaying }
-        }
+        // Artwork only while there's a track: after a stop the strip keeps the last one
+        // through the grace and as it leaves (the model's is nil by then). The bars rest.
+        if inputs.track != nil, state.artwork !== model.nowPlayingArtwork { state.artwork = model.nowPlayingArtwork }
+        let playing = inputs.track?.isPlaying ?? false
+        if state.playing != playing { state.playing = playing }
         // A hub that opens over the strip leaves its empty panel taking clicks until the
         // hub closes: a click aimed at the strip after a hover-open lands here (a no-op
         // for HubController's monitors), not on the menu item the strip was covering.
@@ -109,11 +109,11 @@ final class NotchStripController {
         }
     }
 
-    /// A pause keeps the strip for `pauseGrace`: decide again when that runs out.
+    /// A pause or a stop keeps the strip for `pauseGrace`: decide again when that runs out.
     private func scheduleGraceEnd(_ inputs: NowPlayingRules.StripInputs) {
         graceTask?.cancel()
         graceTask = nil
-        guard let track = inputs.track, !track.isPlaying, let pausedAt = inputs.pausedAt else { return }
+        guard inputs.track?.isPlaying != true, let pausedAt = inputs.pausedAt else { return }
         let remaining = pausedAt.addingTimeInterval(NowPlayingRules.pauseGrace).timeIntervalSince(inputs.now)
         guard remaining > 0 else { return }
         graceTask = Task { [weak self] in
@@ -159,15 +159,21 @@ final class NotchStripController {
 
     /// Re-read when the space or the front app changes, never polled.
     private func spaceOrAppChanged() {
-        fullscreen = readFullscreen()
+        let first = readFullscreen()
+        fullscreen = first
         update()
         // The window list can lag the notification while a fullscreen space animates
-        // in or out; one more read a moment later settles it.
+        // in or out; one more read a moment later settles it. Logged when it disagrees
+        // with the first read, so a live check shows whether this re-read earns its keep.
         fullscreenRecheck?.cancel()
         fullscreenRecheck = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled, let self else { return }
-            self.fullscreen = self.readFullscreen()
+            let second = self.readFullscreen()
+            if second != first {
+                Logger.nowPlaying.notice("fullscreen re-read changed: \(second ? "fullscreen" : "not fullscreen", privacy: .public)")
+            }
+            self.fullscreen = second
             self.update()
         }
     }
@@ -200,9 +206,7 @@ struct NotchStripView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .ignoresSafeArea()
-        // The hub's animations (HubView).
-        .animation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(response: 0.45, dampingFraction: 0.75),
-                   value: state.visible)
+        .animation(HubView.animation(reduceMotion: reduceMotion), value: state.visible)
     }
 
     private var band: some View {
