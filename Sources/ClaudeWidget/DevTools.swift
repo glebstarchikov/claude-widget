@@ -1,5 +1,6 @@
 import AppKit
 import ClaudeWidgetCore
+import MediaRemoteAdapter
 
 /// Off-screen asset generation invoked by the build scripts (`bundle.sh`,
 /// `dmg.sh`), never at runtime. Kept out of `main.swift` so the app's entry
@@ -21,7 +22,37 @@ enum DevTools {
             renderDMGBackground(to: URL(fileURLWithPath: arguments[i + 1]))
             return true
         }
+        if arguments.contains("--now-playing-check") {
+            nowPlayingCheck()
+            return true
+        }
         return false
+    }
+
+    /// Prints where the adapter resolved its dylib and perl script, plus one read of the
+    /// current track. A dev tool on demand, so the title is printed here.
+    private static func nowPlayingCheck() {
+        let controller = MediaController()
+        func report(_ label: String, _ path: String?) {
+            let found = path.map { FileManager.default.fileExists(atPath: $0) } ?? false
+            print("\(label): \(path ?? "nil") (\(found ? "found" : "missing"))")
+        }
+        report("library", controller.libraryPath)
+        report("script", controller.perlScriptPath)
+        var done = false
+        controller.getTrackInfo { info in
+            if let title = info?.payload.title {
+                print("track: \(title) — \(info?.payload.applicationName ?? "unknown app")")
+            } else {
+                print("track: none")
+            }
+            done = true
+        }
+        let deadline = Date().addingTimeInterval(5)
+        while !done && Date() < deadline {
+            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+        if !done { print("track: none") }
     }
 
     private static func writePNG(_ image: NSImage, to url: URL) {

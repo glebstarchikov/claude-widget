@@ -4,6 +4,7 @@ import PackageDescription
 let package = Package(
     name: "claude-widget",
     platforms: [.macOS("26.0")],
+    dependencies: [.package(path: "Vendor/MediaRemoteAdapter")],
     targets: [
         .target(name: "ClaudeWidgetCore"),
         .executableTarget(
@@ -13,7 +14,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "ClaudeWidget",
-            dependencies: ["ClaudeWidgetCore"]
+            dependencies: [
+                "ClaudeWidgetCore",
+                .product(name: "MediaRemoteAdapter", package: "MediaRemoteAdapter"),
+            ]
         ),
         .testTarget(
             name: "ClaudeWidgetCoreTests",

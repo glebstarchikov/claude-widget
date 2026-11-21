@@ -15,6 +15,9 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp .build/release/ClaudeWidget "$APP/Contents/MacOS/Claude Widget"
 cp .build/release/claude-widget-hook "$APP/Contents/MacOS/"
+# MediaRemote adapter: the executable's rpath is @loader_path, so the dylib sits beside it.
+cp .build/release/libMediaRemoteAdapter.dylib "$APP/Contents/MacOS/"
+cp Vendor/MediaRemoteAdapter/Sources/MediaRemoteAdapter/Resources/run.pl "$APP/Contents/Resources/"
 
 # Render the critter app icon into an iconset, then compile to .icns.
 ICONSET="build/AppIcon.iconset"
