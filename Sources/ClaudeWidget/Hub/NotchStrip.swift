@@ -30,6 +30,8 @@ final class NotchStripController {
     private var fullscreen = false
     /// nil until the first decision, so that one is logged too.
     private var visible: Bool?
+    /// The hub opened over the strip and is still open (see `update`).
+    private var heldForHub = false
     private var graceTask: Task<Void, Never>?
     private var fullscreenRecheck: Task<Void, Never>?
     private var subscriptions: [AnyCancellable] = []
@@ -85,10 +87,20 @@ final class NotchStripController {
             if state.artwork !== model.nowPlayingArtwork { state.artwork = model.nowPlayingArtwork }
             if state.playing != track.isPlaying { state.playing = track.isPlaying }
         }
+        // A hub that opens over the strip leaves its empty panel taking clicks until the
+        // hub closes: a click aimed at the strip after a hover-open lands here (a no-op
+        // for HubController's monitors), not on the menu item the strip was covering.
+        let held = !show && inputs.hubOpen && (heldForHub || visible == true)
+        if held != heldForHub {
+            heldForHub = held
+            if held { Logger.nowPlaying.notice("strip holds clicks for the hub") }
+            else { Logger.nowPlaying.notice("strip released") }
+        }
+        let ignores = !(show || held)
+        if panel.ignoresMouseEvents != ignores { panel.ignoresMouseEvents = ignores }
         guard show != visible else { return }
         visible = show
         state.visible = show
-        panel.ignoresMouseEvents = !show
         hub.setStripFrame(show ? panel.frame : nil)
         if show {
             Logger.nowPlaying.notice("strip shown")
