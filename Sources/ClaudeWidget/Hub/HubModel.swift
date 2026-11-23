@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import ClaudeWidgetCore
 
@@ -23,6 +24,9 @@ enum LimitsState: Equatable {
     case unavailable(last: ProviderUsage?)
 }
 
+/// A transport button on the now-playing card.
+enum NowPlayingCommand { case togglePlayPause, previous, next }
+
 /// A permission request the widget acked and is holding for Gleb's answer (spec §8).
 struct PendingApproval: Identifiable, Equatable {
     let id: String
@@ -46,6 +50,14 @@ final class HubModel: ObservableObject {
     @Published var limitsFromCache = false
     /// A renewed sign-in couldn't be saved to the Keychain (kept in memory, save retried).
     @Published var limitsSaveFailed = false
+    /// What's playing, kept current by NowPlayingMonitor. nil: nothing is.
+    @Published var nowPlaying: NowPlaying?
+    @Published var nowPlayingArtwork: NSImage?
+    /// When the current pause began (NowPlayingRules.pausedAt).
+    @Published var nowPlayingPausedAt: Date?
+    var nowPlayingCommand: (NowPlayingCommand) -> Void = { _ in }
+    /// Brings the playing app forward (the card's title).
+    var openNowPlayingApp: () -> Void = {}
     /// Opens the Settings window (the Limits module's gear).
     var openSettings: () -> Void = {}
     /// The Allow/Deny buttons (ApprovalCoordinator.answer).

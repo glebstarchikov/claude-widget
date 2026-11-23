@@ -14,6 +14,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: SettingsWindowController!
     private var usage: UsageMonitor!
     private var limitsToggle: AnyCancellable?
+    private var nowPlaying: NowPlayingMonitor!
+    private var nowPlayingToggle: AnyCancellable?
+    private var strip: NotchStripController!
     private var approvals: ApprovalCoordinator!
     private var approvalsToggle: AnyCancellable?
     private var proactiveToggle: AnyCancellable?
@@ -43,6 +46,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "hubHoverEnabled": true,
             "answerFromNotchEnabled": true,
             "limitsEnabled": true,
+            "nowPlayingEnabled": true,
+            "nowPlayingNotchEnabled": true,
             "pushEnabled": false,
             "theme": "claude",
             "themeCustomColor": ThemePalette.defaultCustom.hex,
@@ -84,6 +89,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         limitsToggle = model.$limitsEnabled.sink { [weak self] enabled in
             if enabled { self?.usage.start() } else { self?.usage.stop() }
         }
+
+        nowPlaying = NowPlayingMonitor(model: hubModel)
+        hubModel.nowPlayingCommand = { [weak self] command in self?.nowPlaying.send(command) }
+        hubModel.openNowPlayingApp = { [weak self] in self?.nowPlaying.openApp() }
+        nowPlaying.onUnavailableChange = { [weak self] unavailable in self?.model.nowPlayingUnavailable = unavailable }
+        nowPlayingToggle = model.$nowPlayingEnabled.sink { [weak self] enabled in
+            if enabled { self?.nowPlaying.start() } else { self?.nowPlaying.stop() }
+        }
+        strip = NotchStripController(model: hubModel, appModel: model, hub: hub)
+        strip.start()
 
         approvals = ApprovalCoordinator(model: hubModel, appModel: model)
         hubModel.answerApproval = { [weak self] id, allow in self?.approvals.answer(id: id, allow: allow) }
@@ -155,6 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         approvals.stop()
+        nowPlaying?.stop()
     }
 
     private func showStatusMenu() {

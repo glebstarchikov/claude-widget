@@ -26,6 +26,13 @@ The hub shows your Claude usage limits from Anthropic's usage feed, the same num
 - The usage and renewal endpoints (`api.anthropic.com/api/oauth/usage`, `platform.claude.com/v1/oauth/token`) are undocumented and may change. If they do, the hub shows "Limits unavailable" and nothing else is affected.
 - Tokens only ever go to Anthropic, are never logged, and are never written to a file; `~/.claude/claude-widget/limits.json` holds numbers only. Settings, Limits, Show Claude limits turns it all off (a renewal already in flight still finishes saving, so a renewed sign-in is never lost).
 
+## Now playing
+Whatever macOS lists as Now Playing (Spotify, Music, a browser tab, a podcast) gets a card in the hub, between Limits and your sessions: artwork, title, "Artist · App", a progress bar, and back, play/pause and next. Click the artwork or title to bring the app forward. While it plays and the hub is closed, the notch widens a little: the artwork on its left, four level bars in your theme color on its right. Click it to open the hub, or rest on it with Open on hover on. The strip leaves 3 seconds after the music pauses or stops, and steps aside for the hub, any alert, and full-screen apps. It only appears on a display with a notch; nothing playing means no card and no strip.
+
+- macOS answers Now Playing only to Apple's own processes, so the widget reads it through Apple's `/usr/bin/perl`, the method from [mediaremote-adapter](https://github.com/ungive/mediaremote-adapter) (BSD 3-Clause, by Jonas van den Berg), vendored from the [ejbills fork](https://github.com/ejbills/mediaremote-adapter) under `Vendor/MediaRemoteAdapter/` with its license.
+- A macOS update could switch this off. Then the card and strip simply don't appear, and Settings may say "Not available on this version of macOS."
+- What's playing never leaves your Mac and is never logged. No permission prompt. Settings, Music turns the card off (and the perl process with it), or only the strip around the notch.
+
 ## Stack
 Swift, SwiftUI (Liquid Glass), AppKit, Swift Package Manager. macOS 26 or later.
 
@@ -41,7 +48,7 @@ scripts/bundle.sh --install
 
 This builds `Claude Widget.app`, installs it to `/Applications`, and launches it. The critter shows in the menu bar. Then right-click the critter, choose Settings…, and under Hooks choose Install hooks (this backs up `~/.claude/settings.json` first, then merges the hook entries additively, keeping your existing hooks). Every hook runs in the background except `PermissionRequest`, which waits for the widget only while it's running, you're not in the session's app, and the pill or hub is visible, at most 30 seconds. With the widget not running it adds about 10 ms.
 
-Settings (right-click the critter): Launch at login; Appearance (theme color, New Year hat); Open on hover, Show alerts proactively, Answer permission prompts; Show Claude limits; phone alerts via [ntfy](https://ntfy.sh) (only the project folder name leaves your Mac); Install or Remove hooks.
+Settings (right-click the critter): Launch at login; Appearance (theme color, New Year hat); Open on hover, Show alerts proactively, Answer permission prompts; Show Claude limits; Music (what's playing, and around the notch); phone alerts via [ntfy](https://ntfy.sh) (only the project folder name leaves your Mac); Install or Remove hooks.
 
 Build and core tests (the commands CI runs):
 
@@ -62,6 +69,14 @@ scripts/simulate.sh approve   # a permission pill through the real hook (variant
 ```
 
 `scripts/simulate.sh` expects a debug build of the hook (`swift build`).
+
+Flags for a bundled build, `"build/Claude Widget.app/Contents/MacOS/Claude Widget" <flag>` after `scripts/bundle.sh`:
+
+```sh
+-nowPlayingPreview YES        # a fake playing track with artwork, no perl and no music needed
+-nowPlayingPreview sparse     # one with no artist, no artwork and no duration
+--now-playing-check           # print the adapter's dylib and script paths and one read of the current track, then exit
+```
 
 To uninstall: in Settings choose Remove hooks, quit the app, delete `/Applications/Claude Widget.app` and `~/.claude/claude-widget`, then remove the widget's sign-in with `security delete-generic-password -s "Claude Widget-usage-credentials"`.
 

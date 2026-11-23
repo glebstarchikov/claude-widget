@@ -10,7 +10,7 @@ final class HubPanel: NSPanel {
 }
 
 /// Takes the first click even though its window is never key.
-private final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
+final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
@@ -40,6 +40,8 @@ final class HubController {
     private let appModel: AppModel
     private var panel: HubPanel!
     private var notch: NotchMetrics?
+    /// The now-playing strip while it shows: it counts as the notch.
+    private var stripFrame: NSRect?
     private var placement: Placement?
     private var hubHeight: CGFloat = 0
     private var pillSize = HubLayout.pillSize
@@ -63,7 +65,7 @@ final class HubController {
     }
 
     func start() {
-        panel = makePanel()
+        panel = Self.makePanel()
         let host = FirstClickHostingView(rootView: HubView(
             model: model,
             onHubHeightChange: { [weak self] height in self?.hubHeight = height },
@@ -119,6 +121,19 @@ final class HubController {
     func showExpanded() {
         guard let place = notch.map(notchPlacement) ?? pointerPlacement() else { return }
         expand(at: place, byHover: false)
+    }
+
+    /// A click on the now-playing strip: opens the hub under the notch.
+    func openFromNotch() {
+        guard let notch else { return }
+        expand(at: notchPlacement(notch), byHover: false)
+    }
+
+    /// The now-playing strip's frame while it shows, nil while it doesn't
+    /// (NotchStripController). Dwelling on it opens the hub, and a hub opened
+    /// while it shows stays open over it.
+    func setStripFrame(_ frame: NSRect?) {
+        stripFrame = frame
     }
 
     func showPill(_ pill: Pill) {
@@ -227,8 +242,8 @@ final class HubController {
                     self?.showsApprovalPill == false ? placement : nil
                 }
             }
-        } else if appModel.hubHoverEnabled, let notch, Self.pointer(p, in: notch.hoverZone) {
-            startDwell(in: notch.hoverZone, for: Self.openDwell) { [weak self] in
+        } else if appModel.hubHoverEnabled, let notch, let zone = notchZone, Self.pointer(p, in: zone) {
+            startDwell(in: zone, for: Self.openDwell) { [weak self] in
                 guard let self, !Self.activeAppIsFullscreen(on: notch.screen) else { return nil }
                 return self.notchPlacement(notch)
             }
@@ -313,7 +328,13 @@ final class HubController {
     private func notchPlacement(_ notch: NotchMetrics) -> Placement {
         Placement(midX: notch.screen.frame.midX,
                   top: notch.screen.frame.maxY - notch.topInset - HubLayout.gapBelowMenuBar,
-                  keepZones: [notch.hoverZone])
+                  keepZones: [notch.hoverZone] + [stripFrame].compactMap { $0 })
+    }
+
+    /// Dwelling here opens the hub: the notch's hover zone, widened by the strip while it shows.
+    private var notchZone: NSRect? {
+        guard let notch else { return nil }
+        return stripFrame.map { notch.hoverZone.union($0) } ?? notch.hoverZone
     }
 
     /// Under the notch if the pointer's screen has one, otherwise top-center
@@ -376,8 +397,9 @@ final class HubController {
     }
 
     /// Whether the active app is fullscreen with a window on `screen`. Checked
-    /// only when a notch dwell completes, so the window list isn't polled.
-    private static func activeAppIsFullscreen(on screen: NSScreen) -> Bool {
+    /// only when a notch dwell completes, and by the now-playing strip when the
+    /// space or front app changes, so the window list isn't polled.
+    static func activeAppIsFullscreen(on screen: NSScreen) -> Bool {
         guard NSApp.currentSystemPresentationOptions.contains(.fullScreen),
               let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
               let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
@@ -399,7 +421,8 @@ final class HubController {
 
     // MARK: - Plumbing
 
-    private func makePanel() -> HubPanel {
+    /// The hub's panel; the now-playing strip uses the same recipe.
+    static func makePanel() -> HubPanel {
         let panel = HubPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
                              backing: .buffered, defer: false)
         // Float above OTHER apps' fullscreen windows. What matters:

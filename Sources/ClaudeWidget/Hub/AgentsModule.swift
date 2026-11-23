@@ -291,14 +291,16 @@ private enum OwnerApp {
     }
 }
 
-/// Bring the app that launched a session (its owner) to the front. Goes
-/// through LaunchServices even when the app is running: the hub never becomes
-/// active, and macOS may refuse `NSRunningApplication.activate()` from an
-/// inactive app, while opening the app activates the existing instance.
+/// Bring an app to the front: the one that launched a session (its owner), or
+/// the one playing music, by PID when known, else by bundle id. Goes through
+/// LaunchServices even when the app is running: the hub never becomes active,
+/// and macOS may refuse `NSRunningApplication.activate()` from an inactive app,
+/// while opening the app activates the existing instance.
 @MainActor
-func activateOwnerApp(_ bundleId: String) {
-    let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first
-    guard let url = running?.bundleURL ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)
+func activateOwnerApp(_ bundleId: String?, pid: Int32? = nil) {
+    guard let url = pid.flatMap({ NSRunningApplication(processIdentifier: $0)?.bundleURL })
+            ?? bundleId.flatMap({ NSRunningApplication.runningApplications(withBundleIdentifier: $0).first?.bundleURL
+                                  ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) })
     else { return }
     NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
 }
