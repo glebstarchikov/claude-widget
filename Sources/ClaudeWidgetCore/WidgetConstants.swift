@@ -27,6 +27,12 @@ public enum WidgetConstants {
     public static var approvalSocket: URL {
         runDir.appendingPathComponent("approve.sock")
     }
+    /// Held (flock) around read-own-entry → renew → save, so instances of the app
+    /// renew one at a time. Also holds the spent-token marker (a fingerprint, never
+    /// a token; see RenewalPlan).
+    public static var renewalLock: URL {
+        runDir.appendingPathComponent("renew.lock")
+    }
     public static var binDir: URL {
         baseDir.appendingPathComponent("bin", isDirectory: true)
     }

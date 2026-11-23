@@ -109,20 +109,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--show-hub") { hub.showExpanded() }
     }
 
-    /// A renewal in flight finishes and saves first (at most `renewalQuitWait`):
-    /// the refresh token it sent is already spent, and only its reply is live.
+    /// A renewal in flight finishes and saves first, and a renewed sign-in still
+    /// unsaved gets one last Keychain save (at most `renewalQuitWait` in all): the
+    /// refresh token it replaced is already spent, and only it is live. No renewal
+    /// is sent once quitting starts, so one still waiting for another instance's
+    /// lock gives up instead of starting one the wait could cut off.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let usage, usage.renewing else { return .terminateNow }
+        guard let usage else { return .terminateNow }
+        usage.prepareToQuit()
+        guard usage.needsQuitWait else { return .terminateNow }
         if quitWaiting { return .terminateLater }
         quitWaiting = true
-        Logger.limits.notice("quit waits for the sign-in renewal")
+        Logger.limits.notice("quit waits for the sign-in renewal or save")
         Task { [weak self] in
-            await usage.renewalFinished()
+            await usage.finishBeforeQuit()
             self?.allowQuit()
         }
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(Self.renewalQuitWait))
-            if self?.quitWaiting == true { Logger.limits.error("quit stopped waiting for the renewal") }
+            if self?.quitWaiting == true { Logger.limits.error("quit stopped waiting for the renewal or save") }
             self?.allowQuit()
         }
         return .terminateLater

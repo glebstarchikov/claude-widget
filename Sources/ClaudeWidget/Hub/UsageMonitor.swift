@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 import os
 import ClaudeWidgetCore
 
@@ -8,22 +7,17 @@ import ClaudeWidgetCore
 ///
 /// Each poll takes the sign-in (the widget's entry, else Claude Code's,
 /// adopted), renews it if it's within 5 min of expiry, then reads the feed; a
-/// 401/403 renews once and retries once. Renewal is guarded: one in flight, one
-/// per 10 minutes, and its result is saved (verified) before it's used.
+/// 401/403 renews once and retries once. Renewal itself (one in flight, one per
+/// 10 minutes, under the cross-instance lock, saved before use) is SignInRenewer.
 @MainActor
 final class UsageMonitor {
     private static let staleAfter: TimeInterval = 60
-    private static let renewalSpacing: TimeInterval = 600
     private static let adoptedHashKey = "limitsAdoptedRefreshHash"
+    /// How long the last save before quitting waits for the renewal lock, inside
+    /// AppDelegate's 5 s quit wait.
+    private static let quitSaveLockWait: TimeInterval = 4
 
-    /// How a poll that got no numbers ends.
-    private enum PollEnd: Error { case expired, unavailable }
     private enum UsageReply { case ok(ProviderUsage), unauthorized, failed }
-    private enum Renewal: Equatable {
-        case renewed(OAuthCredential), rejected, unreachable
-        /// Failed before anything was sent (no network, no host): gives the 10-min slot back.
-        case notSent
-    }
 
     private let model: HubModel
     /// One session for usage and renewal. No URL cache or cookie store, so a
@@ -40,16 +34,22 @@ final class UsageMonitor {
     }()
 
     private var running = false
+    /// Set once quitting starts: no renewal may be sent after that (prepareToQuit).
+    private var quitting = false
     private var loop: Task<Void, Never>?
     private var lastAttempt: Date?
     private var lastGood: ProviderUsage?
     private var consecutiveFailures = 0
 
-    private var renewal: Task<Renewal, Never>?
-    private var lastRenewal: (at: Date, reachedServer: Bool)?
-    /// A renewed sign-in whose save failed. The refresh token it replaced is
-    /// already dead, so it's kept for this run and the save retried each poll.
-    private var unsaved: OAuthCredential?
+    private lazy var renewer = SignInRenewer(
+        lockPath: WidgetConstants.renewalLock.path,
+        maySend: { [weak self] in self.map { $0.running && !$0.quitting } ?? false },
+        readOwn: { await WidgetKeychain.readOwn() },
+        send: { [weak self] request in
+            guard let self else { throw URLError(.cancelled) }
+            return try await self.send(request)
+        },
+        save: { await WidgetKeychain.save($0) })
 
     init(model: HubModel) { self.model = model }
 
@@ -65,7 +65,7 @@ final class UsageMonitor {
         } else {
             model.limits = .loading
         }
-        model.limitsSaveFailed = unsaved != nil
+        model.limitsSaveFailed = renewer.unsaved != nil
         restartLoop()
     }
 
@@ -80,13 +80,23 @@ final class UsageMonitor {
         model.limitsSaveFailed = false
     }
 
-    /// A renewal is in flight. Once it's sent, only its reply holds a live refresh
-    /// token, so quitting before it's saved would lose the sign-in (AppDelegate waits).
-    var renewing: Bool { renewal != nil }
+    /// Quitting now could lose the sign-in, so AppDelegate waits (at most 5 s): a
+    /// renewal is in flight (once sent, only its reply holds a live refresh token),
+    /// or a renewed sign-in is still unsaved (the only copy is in memory).
+    var needsQuitWait: Bool { renewer.renewing || renewer.unsaved != nil }
 
-    /// Returns once the renewal in flight, if any, has finished: request and verified save.
-    func renewalFinished() async {
-        _ = await renewal?.value
+    /// Before quitting: the renewal in flight, if any, finishes (request and
+    /// verified save), then a sign-in still unsaved gets one last save. Keychain
+    /// only; nothing is sent once quitting starts.
+    func finishBeforeQuit() async {
+        await renewer.finished()
+        await renewer.saveUnsavedBeforeQuit(waitingUpTo: Self.quitSaveLockWait)
+    }
+
+    /// Quitting has started: from now on no renewal is sent, and one still waiting
+    /// for another instance's lock gives up (nothing has been sent, so nothing is lost).
+    func prepareToQuit() {
+        quitting = true
     }
 
     /// On hub open: poll now unless a poll started in the last 60 s. While polls
@@ -129,14 +139,14 @@ final class UsageMonitor {
         case .failure(let end): return finish(end)
         }
         if CredentialParser.needsRenewal(credential, now: Date()) {
-            switch await renewOrReadopt(credential) {
+            switch await renewOrReadopt(credential, afterFeedRefusal: false) {
             case .success(let c): credential = c
             case .failure(let end): return finish(end)
             }
         }
         var reply = await readUsage(with: credential)
         if case .unauthorized = reply {
-            switch await renewOrReadopt(credential) {
+            switch await renewOrReadopt(credential, afterFeedRefusal: true) {
             case .success(let renewed): reply = await readUsage(with: renewed)
             case .failure(let end): return finish(end)
             }
@@ -157,29 +167,29 @@ final class UsageMonitor {
         return .success
     }
 
-    private func finish(_ end: PollEnd) -> UsageFetchOutcome {
-        switch end {
-        case .expired:
-            if active {
+    private func finish(_ end: LimitsFailure) -> UsageFetchOutcome {
+        if active {
+            switch end {
+            case .expired:
                 Logger.limits.notice("sign-in expired")
                 model.limits = .expired(last: lastGood)
+            case .unavailable:
+                model.limits = .unavailable(last: lastGood)
             }
-            return .unauthorized
-        case .unavailable:
-            if active { model.limits = .unavailable(last: lastGood) }
-            return .failure
         }
+        return end.fetchOutcome
     }
 
     // MARK: - Sign-in
 
     /// The sign-in for this poll: one renewed earlier whose save failed (retrying
     /// the save), else the widget's own entry, else Claude Code's, adopted.
-    private func signIn() async -> Result<OAuthCredential, PollEnd> {
-        if let pending = unsaved {
-            if await WidgetKeychain.save(pending) { unsaved = nil }
-            if active { model.limitsSaveFailed = unsaved != nil }
-            return .success(pending)
+    private func signIn() async -> Result<OAuthCredential, LimitsFailure> {
+        if renewer.unsaved != nil {
+            let pending = await renewer.retryUnsaved()
+            if active { model.limitsSaveFailed = renewer.unsaved != nil }
+            // nil: a renewal saved or replaced it meanwhile, so the entry is current.
+            if let pending { return .success(pending) }
         }
         switch await WidgetKeychain.readOwn() {
         case .found(let own):
@@ -190,86 +200,58 @@ final class UsageMonitor {
             return .failure(.unavailable)
         case .absent:
             guard active else { return .failure(.unavailable) }
-            guard let adopted = await adoptClaudeCode(onlyIfNew: false) else { return .failure(.expired) }
+            guard let adopted = await adoptClaudeCode(onlyIfNew: false, replacing: nil) else { return .failure(.expired) }
             return .success(adopted)
         }
     }
 
-    /// Copies Claude Code's sign-in into the widget's own entry and remembers a
-    /// hash of its refresh token (never the token). With `onlyIfNew`, only a
-    /// sign-in other than the one adopted last time (Gleb ran /login again).
-    private func adoptClaudeCode(onlyIfNew: Bool) async -> OAuthCredential? {
+    /// Copies Claude Code's sign-in into the widget's own entry in place of
+    /// `replacing` (SignInRenewer.adopt) and remembers a hash of its refresh token
+    /// (never the token). With `onlyIfNew`, only a sign-in other than the one
+    /// adopted last time (Gleb ran /login again).
+    private func adoptClaudeCode(onlyIfNew: Bool, replacing: OAuthCredential?) async -> OAuthCredential? {
         guard let theirs = await WidgetKeychain.readClaudeCode() else { return nil }
-        let hash = Self.sha256Hex(theirs.refreshToken)
-        if onlyIfNew, hash == UserDefaults.standard.string(forKey: Self.adoptedHashKey) { return nil }
+        let hash = Adoption.fingerprint(refreshToken: theirs.refreshToken)
+        guard Adoption.shouldAdopt(fingerprint: hash, lastAdopted: UserDefaults.standard.string(forKey: Self.adoptedHashKey),
+                                   onlyIfNew: onlyIfNew) else { return nil }
         guard active else { return nil }
-        if await WidgetKeychain.save(theirs) {
+        switch await renewer.adopt(theirs, replacing: replacing) {
+        case .saved:
             UserDefaults.standard.set(hash, forKey: Self.adoptedHashKey)
-            unsaved = nil   // superseded by the new sign-in
             model.limitsSaveFailed = false
             Logger.limits.notice("adopted Claude Code's sign-in")
-        } else {
+            return theirs
+        case .notSaved:
             // It's still valid in Claude Code's entry: use it this poll, adopt again next poll.
             Logger.limits.error("adoption not saved; using Claude Code's sign-in for this poll")
+            return theirs
+        case .superseded(let newer):
+            Logger.limits.notice("adoption skipped: a renewal saved a newer sign-in meanwhile")
+            return newer
+        case .spent:
+            Logger.limits.error("adoption skipped: a renewal here already spent that sign-in")
+            return nil
         }
-        return theirs
     }
 
     /// Renews `credential`, or failing that adopts a newer Claude Code sign-in.
-    /// A renewal that never reached the server leaves the limits unavailable
-    /// (retried with backoff); one the server refused means the sign-in expired.
-    private func renewOrReadopt(_ credential: OAuthCredential) async -> Result<OAuthCredential, PollEnd> {
+    /// Expired only when the server refused the renewal, or when the feed refused a
+    /// sign-in renewed in the last 10 minutes (RenewalOutcome.failure); any other
+    /// failure leaves the limits unavailable (retried with backoff).
+    private func renewOrReadopt(_ credential: OAuthCredential,
+                                afterFeedRefusal: Bool) async -> Result<OAuthCredential, LimitsFailure> {
         let result = await renew(credential)
         if case .renewed(let renewed) = result { return .success(renewed) }
         guard active else { return .failure(.unavailable) }
-        if let adopted = await adoptClaudeCode(onlyIfNew: true) { return .success(adopted) }
-        return .failure(result == .rejected ? .expired : .unavailable)
+        if let adopted = await adoptClaudeCode(onlyIfNew: true, replacing: credential) { return .success(adopted) }
+        return .failure(result.failure(afterFeedRefusal: afterFeedRefusal))
     }
 
-    /// At most one renewal in flight and one per 10 minutes; inside that window
-    /// the last attempt's verdict stands.
-    private func renew(_ credential: OAuthCredential) async -> Renewal {
-        if let renewal { return await renewal.value }
-        if let last = lastRenewal, Date().timeIntervalSince(last.at) < Self.renewalSpacing {
-            Logger.limits.notice("renewal skipped: one per 10 min")
-            return last.reachedServer ? .rejected : .unreachable
-        }
-        guard active else { return .unreachable }
-        let previous = lastRenewal
-        let started = Date()
-        lastRenewal = (started, false)
-        // Unstructured, so stopping the poll can't cancel it: once the request is
-        // sent, only the reply holds a live refresh token.
-        let task = Task { await self.performRenewal(credential) }
-        renewal = task
-        let result = await task.value
-        renewal = nil
-        // Nothing was sent: give the slot back (the poll backoff still spaces attempts).
-        lastRenewal = result == .notSent ? previous : (started, result != .unreachable)
-        return result
-    }
-
-    private func performRenewal(_ credential: OAuthCredential) async -> Renewal {
-        let reply: (body: Data, status: Int)
-        do {
-            reply = try await send(TokenRefresh.makeRequest(refreshToken: credential.refreshToken))
-        } catch {
-            Logger.limits.error("renewal request failed (\(Self.errorCode(error)))")
-            return TokenRefresh.neverSent(error) ? .notSent : .unreachable
-        }
-        Logger.limits.notice("renewal status \(reply.status)")
-        guard reply.status == 200, let renewed = try? TokenRefresh.parseResponse(reply.body, now: Date())
-        else { return .rejected }
-        // Save before use. The refresh token just sent is dead now, so a failed
-        // save keeps the new sign-in in memory and retries each poll.
-        unsaved = await WidgetKeychain.save(renewed) ? nil : renewed
-        if running { model.limitsSaveFailed = unsaved != nil }
-        // Already due for renewal again: a failure, never a reason to renew again.
-        guard !CredentialParser.needsRenewal(renewed, now: Date()) else {
-            Logger.limits.error("renewed sign-in is already within 5 min of expiry")
-            return .rejected
-        }
-        return .renewed(renewed)
+    private func renew(_ credential: OAuthCredential) async -> RenewalOutcome {
+        guard active else { return .notSent }
+        let outcome = await renewer.renew(credential)
+        if running { model.limitsSaveFailed = renewer.unsaved != nil }
+        return outcome
     }
 
     // MARK: - Feed
@@ -291,10 +273,8 @@ final class UsageMonitor {
                 return .failed
             }
             return .ok(usage)
-        case 401, 403:
-            return .unauthorized
         default:
-            return .failed
+            return UsageRequest.refused(status: reply.status) ? .unauthorized : .failed
         }
     }
 
@@ -307,7 +287,7 @@ final class UsageMonitor {
         (error as? URLError)?.code.rawValue ?? -1
     }
 
-    // MARK: - Cache and hash
+    // MARK: - Cache
 
     private static func loadCache() -> ProviderUsage? {
         guard let data = try? Data(contentsOf: WidgetConstants.limitsCache) else { return nil }
@@ -319,10 +299,6 @@ final class UsageMonitor {
         guard let data = try? JSONEncoder().encode(usage) else { return }
         try? FileManager.default.createDirectory(at: WidgetConstants.baseDir, withIntermediateDirectories: true)
         try? data.write(to: WidgetConstants.limitsCache, options: .atomic)
-    }
-
-    private static func sha256Hex(_ text: String) -> String {
-        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }
 
