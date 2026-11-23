@@ -97,8 +97,9 @@ struct NowPlayingModule: View {
 }
 
 /// Draws the label as-is. `.borderless` dims its label in a window that isn't key,
-/// and the hub panel never is; a press still dims a little.
-private struct AsIsButtonStyle: ButtonStyle {
+/// and the hub panel never is; a press still dims a little. The limits gear uses it
+/// too: as `.borderless` it sometimes reopened dim and caught up ~0.6 s later.
+struct AsIsButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .contentShape(Rectangle())
