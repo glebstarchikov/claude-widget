@@ -5,17 +5,58 @@ import ClaudeWidgetCore
 
 @MainActor
 final class AppModel: ObservableObject {
-    @Published var sessions: [Session] = []
     @Published var hooksInstalled = false
 
-    @Published var notchAlerts: Bool {
-        didSet { UserDefaults.standard.set(notchAlerts, forKey: "notchAlertsEnabled") }
+    /// Hover the notch to open the hub (pills and the critter click work either way).
+    @Published var hubHoverEnabled: Bool {
+        didSet { UserDefaults.standard.set(hubHoverEnabled, forKey: "hubHoverEnabled") }
+    }
+
+    /// Answer permission prompts from the notch (ApprovalCoordinator); off passes every request back to Claude Code.
+    @Published var answerFromNotch: Bool {
+        didSet { UserDefaults.standard.set(answerFromNotch, forKey: "answerFromNotchEnabled") }
     }
 
     /// When the notch is on, whether it also pops up on its own for needs-you /
     /// finished events (vs. only revealing on hover).
     @Published var notchProactive: Bool {
         didSet { UserDefaults.standard.set(notchProactive, forKey: "notchProactiveEnabled") }
+    }
+
+    /// Show Claude's usage limits in the hub. Off stops every Keychain read and network call for them.
+    @Published var limitsEnabled: Bool {
+        didSet { UserDefaults.standard.set(limitsEnabled, forKey: "limitsEnabled") }
+    }
+
+    /// Show what's playing in the hub. Off stops the adapter's perl process.
+    @Published var nowPlayingEnabled: Bool {
+        didSet { UserDefaults.standard.set(nowPlayingEnabled, forKey: "nowPlayingEnabled") }
+    }
+
+    /// Also show it around the closed notch.
+    @Published var nowPlayingNotchEnabled: Bool {
+        didSet { UserDefaults.standard.set(nowPlayingNotchEnabled, forKey: "nowPlayingNotchEnabled") }
+    }
+
+    /// The listener kept dying and was given up on (NowPlayingMonitor). Not persisted.
+    @Published var nowPlayingUnavailable = false
+
+    @Published var theme: ThemeID {
+        didSet { UserDefaults.standard.set(theme.rawValue, forKey: "theme"); applyTheme() }
+    }
+
+    /// `#RRGGBB`, used when `theme` is `.custom`.
+    @Published var customThemeColor: String {
+        didSet { UserDefaults.standard.set(customThemeColor, forKey: "themeCustomColor"); applyTheme() }
+    }
+
+    /// Whether the critter wears a hat during the New Year window.
+    @Published var newYearHat: Bool {
+        didSet { UserDefaults.standard.set(newYearHat, forKey: "newYearHat"); applyTheme() }
+    }
+
+    private func applyTheme() {
+        ThemeStore.shared.apply(id: theme, customHex: customThemeColor, hatSetting: newYearHat)
     }
 
     @Published var pushEnabled: Bool {
@@ -56,11 +97,20 @@ final class AppModel: ObservableObject {
     func sendTestPush() { notifier.sendTest() }
 
     init() {
-        notchAlerts = UserDefaults.standard.bool(forKey: "notchAlertsEnabled")
+        hubHoverEnabled = UserDefaults.standard.bool(forKey: "hubHoverEnabled")
+        answerFromNotch = UserDefaults.standard.bool(forKey: "answerFromNotchEnabled")
         notchProactive = UserDefaults.standard.bool(forKey: "notchProactiveEnabled")
+        limitsEnabled = UserDefaults.standard.bool(forKey: "limitsEnabled")
+        nowPlayingEnabled = UserDefaults.standard.bool(forKey: "nowPlayingEnabled")
+        nowPlayingNotchEnabled = UserDefaults.standard.bool(forKey: "nowPlayingNotchEnabled")
+        theme = ThemeID(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .claude
+        let storedColor = UserDefaults.standard.string(forKey: "themeCustomColor") ?? ""
+        customThemeColor = RGB(hex: storedColor) == nil ? ThemePalette.defaultCustom.hex : storedColor
+        newYearHat = UserDefaults.standard.bool(forKey: "newYearHat")
         pushEnabled = UserDefaults.standard.bool(forKey: "pushEnabled")
         pushTopic = UserDefaults.standard.string(forKey: "pushTopic") ?? ""
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        applyTheme()
         refreshHooksStatus()
     }
 

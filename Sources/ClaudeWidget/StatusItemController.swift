@@ -11,6 +11,7 @@ final class StatusItemController: NSObject {
     private var appearanceObservation: NSKeyValueObservation?
 
     var onClick: (() -> Void)?
+    var onRightClick: (() -> Void)?
     var button: NSStatusBarButton? { statusItem.button }
 
     override init() {
@@ -18,6 +19,7 @@ final class StatusItemController: NSObject {
         statusItem.button?.wantsLayer = true
         statusItem.button?.target = self
         statusItem.button?.action = #selector(clicked)
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         appearanceObservation = statusItem.button?.observe(\.effectiveAppearance) { [weak self] _, _ in
             Task { @MainActor in self?.render(pose: self?.currentBasePose ?? .idle) }
         }
@@ -27,7 +29,21 @@ final class StatusItemController: NSObject {
         applyState(.asleep)
     }
 
-    @objc private func clicked() { onClick?() }
+    @objc private func clicked() {
+        if NSApp.currentEvent?.type == .rightMouseUp || NSApp.currentEvent?.modifierFlags.contains(.control) == true {
+            onRightClick?()
+        } else {
+            onClick?()
+        }
+    }
+
+    /// Shows `menu` under the status item. Attached only for the duration of the
+    /// click so left-click keeps its custom action.
+    func showMenu(_ menu: NSMenu) {
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
 
     @objc private func motionPreferenceChanged() {
         Task { @MainActor in self.applyState(self.aggregate) }
@@ -110,10 +126,16 @@ final class StatusItemController: NSObject {
         statusItem.button?.layer?.opacity = 1
     }
 
+    /// Re-renders the current pose (a theme or hat change) without touching timers or the pulse.
+    func refresh() {
+        render(pose: currentBasePose)
+    }
+
     private func render(pose: CritterPose) {
         guard let button = statusItem.button else { return }
         let dark = button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         let (color, opacity) = Theme.critterColor(state: aggregate, darkAppearance: dark)
-        button.image = CritterRenderer.image(pose: pose, color: color, opacity: opacity)
+        button.image = CritterRenderer.image(pose: pose, color: color, opacity: opacity,
+                                          hat: ThemeStore.shared.hatOn, badge: aggregate == .needsYou)
     }
 }

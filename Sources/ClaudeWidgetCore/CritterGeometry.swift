@@ -5,6 +5,11 @@ public enum CritterPose: Equatable, Sendable {
     case idle, walkA, walkB, blink, asleep
 }
 
+public struct Circle2D: Equatable, Sendable {
+    public let center: CGPoint
+    public let radius: CGFloat
+}
+
 public enum CritterGeometry {
     public static let canvas = CGSize(width: 24, height: 24)
 
@@ -43,5 +48,35 @@ public enum CritterGeometry {
         default:
             return eyes
         }
+    }
+
+    // MARK: New Year hat and needs-you badge
+
+    /// With the hat on, the body is drawn this far down so the hat fits in the
+    /// canvas above it (body bottom lands at 23 of 24). The hat's own
+    /// coordinates already include this shift; `bodyRects` itself is unchanged.
+    public static let hatBodyShift: CGFloat = 3
+
+    /// Cone centered over the body; its tip bends back to the left, so the pom hangs left of center.
+    public static func hatCone() -> CGPath {
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: 8, y: 6.6))
+        path.addLine(to: CGPoint(x: 16, y: 6.6))
+        path.addLine(to: CGPoint(x: 14.2, y: 2.4))
+        path.addQuadCurve(to: CGPoint(x: 11.2, y: 1.6), control: CGPoint(x: 13, y: 0.4))
+        path.closeSubpath()
+        return path
+    }
+    public static let hatBrim = CGRect(x: 7.6, y: 6.3, width: 8.8, height: 1.8)
+    public static let hatPom = Circle2D(center: CGPoint(x: 11, y: 1.6), radius: 1.25)
+
+    /// Top-right "needs you" dot; `badgeGap` is the clear ring cut around it.
+    public static let badge = Circle2D(center: CGPoint(x: 20.2, y: 3.8), radius: 2.6)
+    public static let badgeGap: CGFloat = 1.2
+
+    /// The badge as drawn: with the hat the body is shifted down, so the badge moves
+    /// with it and keeps sitting on the body's top-right corner.
+    public static func badge(hat: Bool) -> Circle2D {
+        hat ? Circle2D(center: CGPoint(x: badge.center.x, y: badge.center.y + hatBodyShift), radius: badge.radius) : badge
     }
 }

@@ -11,6 +11,8 @@ public struct HookPayload: Sendable {
     public var model: String?
     public var sessionTitle: String?
     public var transcriptPath: String?
+    /// `tool_input` re-serialized with sorted keys (nil when absent or not an object).
+    public var toolInputJSON: String?
 
     public init?(json: Data) {
         guard let obj = try? JSONSerialization.jsonObject(with: json) as? [String: Any],
@@ -24,6 +26,10 @@ public struct HookPayload: Sendable {
         model = obj["model"] as? String
         sessionTitle = obj["session_title"] as? String
         transcriptPath = obj["transcript_path"] as? String
+        if let input = obj["tool_input"] as? [String: Any],
+           let data = try? JSONSerialization.data(withJSONObject: input, options: [.sortedKeys]) {
+            toolInputJSON = String(data: data, encoding: .utf8)
+        }
         if let name = toolName {
             toolDisplay = Self.formatTool(name: name, input: obj["tool_input"] as? [String: Any])
         }
@@ -99,6 +105,23 @@ public enum EventMapper {
         default:
             return .ignore
         }
+    }
+
+    /// After the notch answered a main-loop permission request: Claude carries on
+    /// (runs the tool, or reads the denial), but no hook says so (PostToolUse isn't
+    /// hooked), so the PermissionRequest hook writes the session back to working
+    /// itself. Only a session still in the needs-you state that request set: a
+    /// later event already moved it on, and a missing file stays missing.
+    public static func notchAnswered(allowed: Bool, payload: HookPayload, previous: Session?, now: Double) -> SessionUpdate {
+        guard payload.agentId == nil, let previous, previous.state == .needsYou else { return .ignore }
+        // Same transition as any event that resumes work: a new working stretch.
+        var session = previous
+        session.state = .working
+        session.message = nil
+        if !allowed { session.tool = nil }   // denied: that tool won't run
+        session.workingSince = now
+        session.updatedAt = now
+        return .write(session)
     }
 
     /// Maps a subagent hook event (has agent_id) to a subagent-record update.

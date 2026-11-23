@@ -1,10 +1,13 @@
 import AppKit
 import ClaudeWidgetCore
+import MediaRemoteAdapter
 
 /// Off-screen asset generation invoked by the build scripts (`bundle.sh`,
 /// `dmg.sh`), never at runtime. Kept out of `main.swift` so the app's entry
 /// point stays just the runtime wiring.
 enum DevTools {
+    /// The DMG arrow stroke: the original indigo, independent of the chosen theme.
+    private static let arrowStroke = NSColor(hex: 0x4B46F5)
     /// Handles a dev-tools flag if present. Returns true when it did (caller exits).
     static func run(_ arguments: [String]) -> Bool {
         if arguments.contains("--dump-poses") {
@@ -19,7 +22,37 @@ enum DevTools {
             renderDMGBackground(to: URL(fileURLWithPath: arguments[i + 1]))
             return true
         }
+        if arguments.contains("--now-playing-check") {
+            nowPlayingCheck()
+            return true
+        }
         return false
+    }
+
+    /// Prints where the adapter resolved its dylib and perl script, plus one read of the
+    /// current track. A dev tool on demand, so the title is printed here.
+    private static func nowPlayingCheck() {
+        let controller = MediaController()
+        func report(_ label: String, _ path: String?) {
+            let found = path.map { FileManager.default.fileExists(atPath: $0) } ?? false
+            print("\(label): \(path ?? "nil") (\(found ? "found" : "missing"))")
+        }
+        report("library", controller.libraryPath)
+        report("script", controller.perlScriptPath)
+        var done = false
+        controller.getTrackInfo { info in
+            if let title = info?.payload.title {
+                print("track: \(title) — \(info?.payload.applicationName ?? "unknown app")")
+            } else {
+                print("track: none")
+            }
+            done = true
+        }
+        let deadline = Date().addingTimeInterval(5)
+        while !done && Date() < deadline {
+            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+        if !done { print("track: none") }
     }
 
     private static func writePNG(_ image: NSImage, to url: URL) {
@@ -29,20 +62,63 @@ enum DevTools {
         }
     }
 
-    /// Dumps one PNG per critter pose/state for eyeballing the animation frames.
+    /// Dumps critter states per theme (working, needs-you dot, asleep, needs-you + hat)
+    /// at 18 pt and 72 pt, on a light and a dark menu bar, for eyeballing.
     private static func dumpPoses(to out: URL) {
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
-        let cases: [(String, CritterPose, NSColor, CGFloat)] = [
-            ("idle-accent-dark", .idle, Theme.accentDark, 0.70),
-            ("walkA", .walkA, Theme.accentDark, 1.0),
-            ("walkB", .walkB, Theme.accentDark, 1.0),
-            ("needsyou-orange", .idle, Theme.claudeOrange, 1.0),
-            ("blink", .blink, Theme.accentDark, 0.70),
-            ("asleep-faint", .asleep, Theme.faintDark, 0.45),
+        let custom = RGB(hex: "#4B46F5")!
+        func ns(_ c: RGB) -> NSColor { NSColor(srgbRed: c.r, green: c.g, blue: c.b, alpha: 1) }
+        let states: [(String, CritterPose, CGFloat, Bool, Bool)] = [
+            ("working", .walkA, 1.0, false, false),
+            ("needsyou", .idle, 1.0, false, true),
+            ("asleep", .asleep, 0.45, false, false),
+            ("needsyou-hat", .idle, 1.0, true, true),
+            ("working-hat", .walkA, 1.0, true, false),
+            ("asleep-hat", .asleep, 0.45, true, false),
+            ("ready-hat", .idle, 0.70, true, false),
         ]
-        for (name, pose, color, opacity) in cases {
-            let image = CritterRenderer.image(pose: pose, color: color, opacity: opacity, pointSize: 72)
-            writePNG(image, to: out.appendingPathComponent("\(name).png"))
+        // Montage columns, in order (18 pt at 2x = 36 px, then enlarged 4x without smoothing).
+        let montageColumns = ["working", "needsyou", "asleep", "working-hat", "needsyou-hat", "asleep-hat"]
+        let bars: [(String, RGB, Bool)] = [("light", ThemePalette.lightBar, false), ("dark", ThemePalette.darkBar, true)]
+        for theme in [ThemeID.claude, .system, .indigo] {
+            let pair = ThemePalette.pair(for: theme, custom: custom)
+            for (barName, bar, dark) in bars {
+                let themed = ns(dark ? pair.dark : pair.light)
+                let faint = dark ? Theme.faintDark : Theme.faintLight
+                for (name, pose, opacity, hat, badge) in states {
+                    let color = pose == .asleep ? faint : themed
+                    for size in [18, 36, 72] as [CGFloat] {
+                        let critter = CritterRenderer.image(pose: pose, color: color, opacity: opacity,
+                                                            pointSize: size, hat: hat, badge: badge)
+                        let canvas = NSImage(size: NSSize(width: size + 8, height: size + 8), flipped: true) { rect in
+                            ns(bar).setFill()
+                            rect.fill()
+                            critter.draw(in: NSRect(x: 4, y: 4, width: size, height: size))
+                            return true
+                        }
+                        writePNG(canvas, to: out.appendingPathComponent("\(theme.rawValue)-\(name)-\(barName)-\(Int(size)).png"))
+                    }
+                }
+                // Montage at 18 pt 2x.
+                let tile: CGFloat = 44, zoom: CGFloat = 4
+                let montage = NSImage(size: NSSize(width: tile * CGFloat(montageColumns.count), height: tile), flipped: true) { rect in
+                    ns(bar).setFill()
+                    rect.fill()
+                    for (i, column) in montageColumns.enumerated() {
+                        guard let (_, pose, opacity, hat, badge) = states.first(where: { $0.0 == column }) else { continue }
+                        let critter = CritterRenderer.image(pose: pose, color: pose == .asleep ? faint : themed, opacity: opacity,
+                                                            pointSize: 36, hat: hat, badge: badge)
+                        critter.draw(in: NSRect(x: CGFloat(i) * tile + 4, y: 4, width: 36, height: 36))
+                    }
+                    return true
+                }
+                let big = NSImage(size: NSSize(width: montage.size.width * zoom, height: tile * zoom), flipped: true) { rect in
+                    NSGraphicsContext.current?.imageInterpolation = .none
+                    montage.draw(in: rect)
+                    return true
+                }
+                writePNG(big, to: out.appendingPathComponent("montage-\(theme.rawValue)-\(barName)-18pt-2x.png"))
+            }
         }
     }
 
@@ -83,7 +159,7 @@ enum DevTools {
         NSRect(x: 0, y: 0, width: w, height: h).fill()
 
         // Icons sit at point (150,200) and (450,200); the arrow spans between them.
-        Theme.accentLight.setStroke()
+        Self.arrowStroke.setStroke()
         let shaft = NSBezierPath()
         shaft.lineWidth = 7
         shaft.lineCapStyle = .round

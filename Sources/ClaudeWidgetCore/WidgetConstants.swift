@@ -8,14 +8,30 @@ public enum WidgetConstants {
     public static let finishedPeekAutoHide: TimeInterval = 5
     public static let staleAfter: TimeInterval = 4 * 3600
     public static let gcInterval: TimeInterval = 3600
-    public static let peekSlideDuration: TimeInterval = 0.24
+    public static let approvalAckTimeout: TimeInterval = 0.5
+    public static let approvalDecisionTimeout: TimeInterval = 30
 
     public static var baseDir: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/claude-widget", isDirectory: true)
     }
+    public static var limitsCache: URL {
+        baseDir.appendingPathComponent("limits.json")
+    }
     public static var stateDir: URL {
         baseDir.appendingPathComponent("state", isDirectory: true)
+    }
+    public static var runDir: URL {
+        baseDir.appendingPathComponent("run", isDirectory: true)
+    }
+    public static var approvalSocket: URL {
+        runDir.appendingPathComponent("approve.sock")
+    }
+    /// Held (flock) around read-own-entry → renew → save, so instances of the app
+    /// renew one at a time. Also holds the spent-token marker (a fingerprint, never
+    /// a token; see RenewalPlan).
+    public static var renewalLock: URL {
+        runDir.appendingPathComponent("renew.lock")
     }
     public static var binDir: URL {
         baseDir.appendingPathComponent("bin", isDirectory: true)
