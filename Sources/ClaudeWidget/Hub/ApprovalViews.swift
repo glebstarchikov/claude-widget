@@ -27,9 +27,8 @@ struct ApprovalButtons: View {
     var review: (_ id: String) -> Void = { _ in }
     @Environment(\.colorScheme) private var colorScheme
 
-    private var indigo: Color {
-        Color(nsColor: colorScheme == .dark ? Theme.accentDark : Theme.accentLight)
-    }
+    private var accent: Color { Color(nsColor: Theme.accent(dark: colorScheme == .dark)) }
+    private var onAccent: Color { Color(nsColor: Theme.onAccent(dark: colorScheme == .dark)) }
 
     /// Never Allow beside text that couldn't be laid out (not measured yet, or too narrow).
     private var action: ApprovalAction {
@@ -44,10 +43,12 @@ struct ApprovalButtons: View {
             switch action {
             case .allow:
                 // Not .glassProminent: in this never-key panel its tint never shows
-                // and Allow looked exactly like Deny (measured); bordered keeps the indigo.
-                Button("Allow") { answer(approval.id, true) }
-                    .buttonStyle(.borderedProminent)
-                    .tint(indigo)
+                // and Allow looked exactly like Deny (measured); bordered keeps the theme accent.
+                Button { answer(approval.id, true) } label: {
+                    Text("Allow").foregroundStyle(onAccent)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(accent)
             case .review:
                 Button("Review") { review(approval.id) }
                     .buttonStyle(.glass)
@@ -262,7 +263,7 @@ struct PendingRequestView: View {
                 if let label {
                     Text(verbatim: label)
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color(nsColor: Theme.claudeOrange))
+                        .foregroundStyle(Color(nsColor: Theme.needsYouRed))
                 }
                 ApprovalSummary(approval: approval)
             }
