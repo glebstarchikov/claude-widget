@@ -41,6 +41,10 @@ struct HubView: View {
 
     @ObservedObject private var themeStore = ThemeStore.shared
     @State private var scrollOffset: CGFloat = 0
+    /// Glass's own appear effect starts see-through, so the hub opened washed out and
+    /// then visibly "popped" (gear included). The cards' glass appears at once instead,
+    /// and switches back right after so closing keeps its fade.
+    @State private var glassAppearsAtOnce = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The hub's spring, or a quick fade with Reduce Motion. The notch strip grows with it too.
@@ -54,6 +58,10 @@ struct HubView: View {
         reduceMotion ? .opacity : .asymmetric(
             insertion: .scale(scale: 0.4, anchor: .top).combined(with: .opacity),
             removal: .scale(scale: 0.85, anchor: .top).combined(with: .opacity))
+    }
+
+    private var cardGlassTransition: GlassEffectTransition {
+        glassAppearsAtOnce ? .identity : .matchedGeometry
     }
 
     private var pillSession: Session? {
@@ -71,6 +79,7 @@ struct HubView: View {
                             .padding(HubLayout.modulePadding)
                             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: HubLayout.cornerRadius,
                                                                         style: .continuous))
+                            .glassEffectTransition(cardGlassTransition)
                     }
                     if let track = model.nowPlaying {
                         NowPlayingModule(track: track, artwork: model.nowPlayingArtwork,
@@ -78,6 +87,7 @@ struct HubView: View {
                             .padding(HubLayout.modulePadding)
                             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: HubLayout.cornerRadius,
                                                                         style: .continuous))
+                            .glassEffectTransition(cardGlassTransition)
                     }
                     AgentsModule(sessions: model.sessions, pending: model.pending,
                                  answer: model.answerApproval, rowTop: model.approvalRowTop,
@@ -98,10 +108,13 @@ struct HubView: View {
                         .padding(HubLayout.modulePadding)
                         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: HubLayout.cornerRadius,
                                                                     style: .continuous))
+                        .glassEffectTransition(cardGlassTransition)
                 }
                 .frame(width: HubLayout.width)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { onHubHeightChange($0) }
                 .transition(transition)
+                .onAppear { DispatchQueue.main.async { glassAppearsAtOnce = false } }
+                .onDisappear { glassAppearsAtOnce = true }
             } else if case .needsYou? = model.pill, let first = model.pending.first {
                 ApprovalPillView(approval: first, extra: model.pending.count - 1,
                                  answer: model.answerApproval, review: model.reviewApproval)
