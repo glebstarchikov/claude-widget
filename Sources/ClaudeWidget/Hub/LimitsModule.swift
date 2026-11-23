@@ -62,7 +62,7 @@ struct LimitsModule: View {
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(AsIsButtonStyle())
                 .help("Settings")
                 .accessibilityLabel("Settings")
             }
