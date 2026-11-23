@@ -181,4 +181,45 @@ final class HookProcessTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: stateFile)), original,
                        "only main-loop requests write the session back")
     }
+
+    // MARK: - Model from the transcript
+
+    private func writeTranscript(_ lines: [String]) throws -> String {
+        let path = home + "/transcript.jsonl"
+        try Data((lines.joined(separator: "\n") + "\n").utf8).write(to: URL(fileURLWithPath: path))
+        return path
+    }
+
+    func testResumedSessionTakesItsModelFromTheTranscript() throws {
+        // A resume's SessionStart carries no model.
+        let path = try writeTranscript([#"{"type":"assistant","message":{"model":"claude-sonnet-5-5"}}"#])
+        _ = try runHook("SessionStart", ["session_id": sessionId, "cwd": "/tmp/p", "source": "resume",
+                                         "transcript_path": path])
+        XCTAssertEqual(try state().model, "claude-sonnet-5-5")
+    }
+
+    func testAModelSwitchShowsAfterTheNextReply() throws {
+        let path = home + "/transcript.jsonl"
+        _ = try runHook("SessionStart", ["session_id": sessionId, "cwd": "/tmp/p", "model": "claude-opus-5-5",
+                                         "transcript_path": path])
+        XCTAssertEqual(try state().model, "claude-opus-5-5")
+        _ = try writeTranscript([#"{"type":"assistant","message":{"model":"claude-opus-5-5"}}"#,
+                                 #"{"type":"assistant","message":{"model":"claude-fable-5-2"}}"#])
+        _ = try runHook("Stop", ["session_id": sessionId, "cwd": "/tmp/p", "transcript_path": path])
+        XCTAssertEqual(try state().model, "claude-fable-5-2")
+    }
+
+    func testTheModelSessionStartReportsWinsOverTheTranscript() throws {
+        let path = try writeTranscript([#"{"type":"assistant","message":{"model":"claude-opus-5-5"}}"#])
+        _ = try runHook("SessionStart", ["session_id": sessionId, "cwd": "/tmp/p", "model": "claude-fable-5-2",
+                                         "transcript_path": path])
+        XCTAssertEqual(try state().model, "claude-fable-5-2")
+    }
+
+    func testAMissingTranscriptKeepsTheKnownModel() throws {
+        _ = try runHook("SessionStart", ["session_id": sessionId, "cwd": "/tmp/p", "model": "claude-opus-5-5"])
+        _ = try runHook("Stop", ["session_id": sessionId, "cwd": "/tmp/p",
+                                 "transcript_path": home + "/no-such-transcript.jsonl"])
+        XCTAssertEqual(try state().model, "claude-opus-5-5")
+    }
 }

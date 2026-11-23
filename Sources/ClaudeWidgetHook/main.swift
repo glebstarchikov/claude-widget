@@ -56,10 +56,15 @@ if let agentId = payload.agentId {
     // Claude desktop app, …) so clicking it in the popover can jump there.
     if case .write(var session) = update {
         session.ownerBundleId = ProcessInfo.processInfo.environment["__CFBundleIdentifier"]
-        if let path = payload.transcriptPath,
-           let lines = readTranscriptTail(path),
-           let ctx = ContextUsage.tokens(fromTranscriptLines: lines) {
-            session.contextTokens = ctx
+        if let path = payload.transcriptPath, let lines = readTranscriptTail(path) {
+            if let ctx = ContextUsage.tokens(fromTranscriptLines: lines) {
+                session.contextTokens = ctx
+            }
+            // Only startup's SessionStart reports the model, and that report wins;
+            // otherwise the newest reply's model covers resumes and /model switches.
+            if payload.model == nil, let model = TranscriptModel.latest(fromTranscriptLines: lines) {
+                session.model = model
+            }
         }
         update = .write(session)
     }
