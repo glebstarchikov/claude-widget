@@ -77,19 +77,9 @@ struct HookInstaller {
 
     /// Copies the bundled hook binary over the installed one without touching
     /// settings.json. Called on every launch so app updates propagate (spec §4.4).
-    /// Atomic: the copy goes to a temporary file beside it and is renamed over the
-    /// installed one, so a hook Claude starts meanwhile finds the old binary or the
-    /// new one, never a missing or half-copied file.
+    /// Atomic and without the quarantine flag; see `HookBinaryCopy`.
     func refreshBinary() throws {
-        try FileManager.default.createDirectory(at: WidgetConstants.binDir,
-                                                withIntermediateDirectories: true)
-        let staging = WidgetConstants.binDir.appendingPathComponent(".claude-widget-hook.\(UUID().uuidString).tmp")
-        try FileManager.default.copyItem(at: bundledHookBinary, to: staging)
-        guard rename(staging.path, WidgetConstants.hookBinary.path) == 0 else {
-            let code = errno
-            try? FileManager.default.removeItem(at: staging)
-            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
-        }
+        try HookBinaryCopy.install(from: bundledHookBinary, to: WidgetConstants.hookBinary)
     }
 
     /// Installed means: settings entries present AND the binary exists.
