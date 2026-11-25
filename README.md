@@ -37,7 +37,7 @@ Whatever macOS lists as Now Playing (Spotify, Music, a browser tab, a podcast) g
 Swift, SwiftUI (Liquid Glass), AppKit, Swift Package Manager. macOS 26 or later.
 
 ## Status
-Maintained, Nov 2026.
+Active, November 2026.
 
 ## Getting started
 On a Mac:
