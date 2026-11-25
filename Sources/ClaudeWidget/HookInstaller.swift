@@ -1,18 +1,16 @@
 import Foundation
+import os
 import ClaudeWidgetCore
+
+extension Logger {
+    /// Hook install logging: error domains and codes only, never a path.
+    static let hooks = Logger(subsystem: "com.glebstarchikov.claude-widget", category: "hooks")
+}
 
 struct HookInstaller {
     /// The command string written into settings.json. "$HOME" is expanded by
     /// the shell Claude Code uses to run hooks, so the config is portable.
     static let settingsBinaryPath = "$HOME/.claude/claude-widget/bin/claude-widget-hook"
-
-    /// The claude-widget-hook binary ships next to the app executable, both in
-    /// `swift build` output and inside Claude Widget.app/Contents/MacOS.
-    private var bundledHookBinary: URL {
-        Bundle.main.executableURL!
-            .deletingLastPathComponent()
-            .appendingPathComponent("claude-widget-hook")
-    }
 
     private func readSettings() throws -> [String: Any] {
         guard FileManager.default.fileExists(atPath: WidgetConstants.claudeSettings.path) else { return [:] }
@@ -77,9 +75,17 @@ struct HookInstaller {
 
     /// Copies the bundled hook binary over the installed one without touching
     /// settings.json. Called on every launch so app updates propagate (spec §4.4).
-    /// Atomic and without the quarantine flag; see `HelperCopy`.
+    /// Atomic, without the quarantine flag, and only from the bundle the app
+    /// started from; see `HelperCopy`.
     func refreshBinary() throws {
-        try HelperCopy.install(from: bundledHookBinary, to: WidgetConstants.hookBinary)
+        do {
+            try HelperCopy.install(from: HelperSources.hook, to: WidgetConstants.hookBinary,
+                                   launchStamp: HelperSources.hookStamp)
+        } catch {
+            let error = error as NSError
+            Logger.hooks.error("could not copy the hook (\(error.domain, privacy: .public) \(error.code, privacy: .public))")
+            throw error
+        }
     }
 
     /// Installed means: settings entries present AND the binary exists.

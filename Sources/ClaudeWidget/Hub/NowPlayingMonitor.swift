@@ -70,16 +70,17 @@ final class NowPlayingMonitor {
 
     /// perl loads the adapter from a fresh copy beside the hook, made on every
     /// listen so an updated app replaces it: in a downloaded app the bundle's own
-    /// copy is quarantined and perl hangs loading it (see HelperCopy). If copying
-    /// fails, nil falls back to the bundle's copy.
+    /// copy is quarantined and perl is refused it (see HelperCopy). If copying
+    /// fails, including when the bundle changed since launch, nil falls back to
+    /// the bundle's copy.
     private static func adapterCopy() -> String? {
-        let bundled = Bundle.main.executableURL!.deletingLastPathComponent()
-            .appendingPathComponent("libMediaRemoteAdapter.dylib")
         do {
-            try HelperCopy.install(from: bundled, to: WidgetConstants.nowPlayingLibrary)
+            try HelperCopy.install(from: HelperSources.adapter, to: WidgetConstants.nowPlayingLibrary,
+                                   launchStamp: HelperSources.adapterStamp)
             return WidgetConstants.nowPlayingLibrary.path
         } catch {
-            Logger.nowPlaying.error("could not copy the adapter; using the bundle's")
+            let error = error as NSError
+            Logger.nowPlaying.error("could not copy the adapter (\(error.domain, privacy: .public) \(error.code, privacy: .public)); using the bundle's")
             return nil
         }
     }
