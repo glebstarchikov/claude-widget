@@ -1,18 +1,16 @@
 import Foundation
+import os
 import ClaudeWidgetCore
+
+extension Logger {
+    /// Hook install logging: error domains and codes only, never a path.
+    static let hooks = Logger(subsystem: "com.glebstarchikov.claude-widget", category: "hooks")
+}
 
 struct HookInstaller {
     /// The command string written into settings.json. "$HOME" is expanded by
     /// the shell Claude Code uses to run hooks, so the config is portable.
     static let settingsBinaryPath = "$HOME/.claude/claude-widget/bin/claude-widget-hook"
-
-    /// The claude-widget-hook binary ships next to the app executable, both in
-    /// `swift build` output and inside Claude Widget.app/Contents/MacOS.
-    private var bundledHookBinary: URL {
-        Bundle.main.executableURL!
-            .deletingLastPathComponent()
-            .appendingPathComponent("claude-widget-hook")
-    }
 
     private func readSettings() throws -> [String: Any] {
         guard FileManager.default.fileExists(atPath: WidgetConstants.claudeSettings.path) else { return [:] }
@@ -77,18 +75,16 @@ struct HookInstaller {
 
     /// Copies the bundled hook binary over the installed one without touching
     /// settings.json. Called on every launch so app updates propagate (spec §4.4).
-    /// Atomic: the copy goes to a temporary file beside it and is renamed over the
-    /// installed one, so a hook Claude starts meanwhile finds the old binary or the
-    /// new one, never a missing or half-copied file.
+    /// Atomic, without the quarantine flag, and only from the bundle the app
+    /// started from; see `HelperCopy`.
     func refreshBinary() throws {
-        try FileManager.default.createDirectory(at: WidgetConstants.binDir,
-                                                withIntermediateDirectories: true)
-        let staging = WidgetConstants.binDir.appendingPathComponent(".claude-widget-hook.\(UUID().uuidString).tmp")
-        try FileManager.default.copyItem(at: bundledHookBinary, to: staging)
-        guard rename(staging.path, WidgetConstants.hookBinary.path) == 0 else {
-            let code = errno
-            try? FileManager.default.removeItem(at: staging)
-            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+        do {
+            try HelperCopy.install(from: HelperSources.hook, to: WidgetConstants.hookBinary,
+                                   launchStamp: HelperSources.hookStamp)
+        } catch {
+            let error = error as NSError
+            Logger.hooks.error("could not copy the hook (\(error.domain, privacy: .public) \(error.code, privacy: .public))")
+            throw error
         }
     }
 

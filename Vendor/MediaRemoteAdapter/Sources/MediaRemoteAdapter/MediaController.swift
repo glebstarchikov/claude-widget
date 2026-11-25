@@ -26,11 +26,16 @@ public class MediaController {
     public var onListenerTerminated: (() -> Void)?
     public var onDecodingError: ((Error, Data) -> Void)?
 
-    public init() {
+    private let libraryPathOverride: String?
+
+    /// `libraryPath`: the dylib perl loads. nil means the one this process loaded.
+    public init(libraryPath: String? = nil) {
+        libraryPathOverride = libraryPath
         _ = MediaController.sigpipeIgnored
     }
 
     public var libraryPath: String? {
+        if let libraryPathOverride { return libraryPathOverride }
         var info = Dl_info()
         let symbol: @convention(c) () -> Void = bootstrap
         guard dladdr(unsafeBitCast(symbol, to: UnsafeRawPointer.self), &info) != 0,

@@ -5,6 +5,11 @@ import ClaudeWidgetCore
 // and exit before any UI spins up. See DevTools.swift.
 if DevTools.run(CommandLine.arguments) { exit(0) }
 
+// Stamp the bundle's helpers now, before AppDelegate (whose model copies the hook)
+// and before now playing starts, which may be days later. Static lets are lazy.
+_ = HelperSources.hookStamp
+_ = HelperSources.adapterStamp
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 // AppDelegate() is @MainActor-isolated; main.swift's top level is a synchronous
