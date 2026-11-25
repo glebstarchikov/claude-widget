@@ -39,6 +39,10 @@ public enum WidgetConstants {
     public static var hookBinary: URL {
         binDir.appendingPathComponent("claude-widget-hook")
     }
+    /// The copy of the now-playing adapter that perl loads (see HelperCopy).
+    public static var nowPlayingLibrary: URL {
+        binDir.appendingPathComponent("libMediaRemoteAdapter.dylib")
+    }
     public static var claudeSettings: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/settings.json")

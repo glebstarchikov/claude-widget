@@ -77,9 +77,9 @@ struct HookInstaller {
 
     /// Copies the bundled hook binary over the installed one without touching
     /// settings.json. Called on every launch so app updates propagate (spec §4.4).
-    /// Atomic and without the quarantine flag; see `HookBinaryCopy`.
+    /// Atomic and without the quarantine flag; see `HelperCopy`.
     func refreshBinary() throws {
-        try HookBinaryCopy.install(from: bundledHookBinary, to: WidgetConstants.hookBinary)
+        try HelperCopy.install(from: bundledHookBinary, to: WidgetConstants.hookBinary)
     }
 
     /// Installed means: settings entries present AND the binary exists.
