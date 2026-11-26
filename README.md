@@ -40,7 +40,9 @@ Swift, SwiftUI (Liquid Glass), AppKit, Swift Package Manager. macOS 26 or later.
 Active, November 2026.
 
 ## Getting started
-On a Mac:
+[Download the latest release](https://github.com/glebstarchikov/claude-widget/releases/latest): get the `.dmg`, open it and drag Claude Widget to Applications. The download is built for Macs with Apple silicon. It isn't notarized by Apple, so macOS blocks it the first time you open it: go to System Settings, Privacy & Security, and under Security choose Open Anyway, then enter your login password ([Apple's steps](https://support.apple.com/guide/mac-help/mh40616/mac)). Then install hooks as described below.
+
+Or build it yourself on a Mac:
 
 ```sh
 scripts/bundle.sh --install
