@@ -2,6 +2,8 @@
 
 A menu bar companion for Claude Code, for anyone who runs long Claude sessions and wants to know their status at a glance, and answer Claude without hunting for the right window.
 
+![The Claude Widget hub under the notch: usage rings, then three sessions, one working with an Explore subagent, one that needs you and one ready](docs/hub.png)
+
 Claude Code sessions run in a terminal or app you might not be watching. Claude Widget mirrors them in the menu bar: a critter that walks while Claude works, pulses with a red dot when Claude needs you, sits idle when a session is open but Claude is quiet, and sleeps when nothing is running. Rest the pointer on the notch, or click the critter, and a Liquid Glass hub drops out of the notch with every live session (state, model, the app it runs in, current tool, elapsed time, context use, subagents), your Claude usage limits, and any permission prompt waiting for you. Requires macOS 26 (Tahoe) or later.
 
 States at a glance:
